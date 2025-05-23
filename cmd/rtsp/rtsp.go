@@ -1,6 +1,7 @@
 package rtsp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/rtsp"
 	"tuya-ipc-terminal/pkg/storage"
 )
@@ -98,10 +100,10 @@ func runStartServer(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(users) == 0 {
-		fmt.Println("No authenticated users found.")
-		fmt.Println("Please add users first:")
-		fmt.Println("  tuya-ipc-terminal auth add [region] [email]")
-		return fmt.Errorf("no authenticated users")
+		core.Logger.Warn().Msg("No authenticated users found.")
+		core.Logger.Warn().Msg("Please add users first:")
+		core.Logger.Warn().Msg("  tuya-ipc-terminal auth add [region] [email]")
+		return errors.New("no authenticated users")
 	}
 
 	// Check if we have any cameras
@@ -111,60 +113,60 @@ func runStartServer(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(cameras) == 0 {
-		fmt.Println("No cameras found.")
-		fmt.Println("Please refresh camera discovery:")
-		fmt.Println("  tuya-ipc-terminal cameras refresh")
-		return fmt.Errorf("no cameras found")
+		core.Logger.Warn().Msg("No cameras found.")
+		core.Logger.Warn().Msg("Please refresh camera discovery:")
+		core.Logger.Warn().Msg("  tuya-ipc-terminal cameras refresh")
+		return errors.New("no cameras found")
 	}
 
 	// Create and start RTSP server
 	rtspServer = rtsp.NewRTSPServer(port, storageManager)
 
-	fmt.Printf("Starting RTSP server on port %d...\n", port)
+	core.Logger.Info().Msgf("Starting RTSP server on port %d...", port)
 
 	if err := rtspServer.Start(); err != nil {
 		return fmt.Errorf("failed to start RTSP server: %v", err)
 	}
 
 	if daemon {
-		fmt.Println("RTSP server started in daemon mode")
+		core.Logger.Info().Msgf("RTSP server started in daemon mode")
 		return nil
 	}
 
 	// Wait for interrupt signal
-	fmt.Println("RTSP server is running. Press Ctrl+C to stop.")
+	core.Logger.Info().Msgf("RTSP server is running. Press Ctrl+C to stop.")
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
 	<-signalChan
 
-	fmt.Println("\nShutting down RTSP server...")
+	core.Logger.Info().Msgf("Shutting down RTSP server...")
 	if err := rtspServer.Stop(); err != nil {
 		return fmt.Errorf("error stopping server: %v", err)
 	}
 
-	fmt.Println("RTSP server stopped.")
+	core.Logger.Info().Msgf("RTSP server stopped.")
 	return nil
 }
 
 // runStopServer handles the stop command
 func runStopServer(cmd *cobra.Command, args []string) error {
 	if rtspServer == nil {
-		return fmt.Errorf("no RTSP server instance found")
+		return errors.New("no RTSP server instance found")
 	}
 
 	if !rtspServer.IsRunning() {
-		fmt.Println("RTSP server is not running")
+		core.Logger.Info().Msg("RTSP server is not running")
 		return nil
 	}
 
-	fmt.Println("Stopping RTSP server...")
+	core.Logger.Info().Msg("Stopping RTSP server...")
 	if err := rtspServer.Stop(); err != nil {
 		return fmt.Errorf("failed to stop server: %v", err)
 	}
 
-	fmt.Println("RTSP server stopped.")
+	core.Logger.Info().Msg("RTSP server stopped.")
 	return nil
 }
 
@@ -216,8 +218,8 @@ func runListEndpoints(cmd *cobra.Command, args []string) error {
 		port = rtspServer.GetPort()
 	}
 
-	fmt.Printf("Available RTSP Endpoints:\n")
-	fmt.Printf("========================\n\n")
+	fmt.Println("Available RTSP Endpoints:")
+	fmt.Println("========================")
 
 	for i, camera := range cameras {
 		fmt.Printf("%d. %s\n", i+1, camera.DeviceName)
@@ -236,7 +238,7 @@ func runListEndpoints(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\nExample usage:\n")
+	fmt.Printf("Example usage:\n")
 	fmt.Printf("  ffplay rtsp://localhost:%d%s\n", port, cameras[0].RTSPPath)
 	fmt.Printf("  vlc rtsp://localhost:%d%s\n", port, cameras[0].RTSPPath)
 

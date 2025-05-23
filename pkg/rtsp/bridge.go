@@ -14,6 +14,7 @@ import (
 	pion "github.com/pion/webrtc/v4"
 	"golang.org/x/net/publicsuffix"
 
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/storage"
 	"tuya-ipc-terminal/pkg/tuya"
 	"tuya-ipc-terminal/pkg/utils"
@@ -22,7 +23,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// WebRTCBridge bridges WebRTC connection to RTP stream
 type WebRTCBridge struct {
 	camera         *storage.CameraInfo
 	resolution     string
@@ -54,7 +54,6 @@ type WebRTCBridge struct {
 	OnError       func(error)
 }
 
-// NewWebRTCBridge creates a new WebRTC bridge
 func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession, storageManager *storage.StorageManager) *WebRTCBridge {
 	wb := WebRTCBridge{
 		camera:         camera,
@@ -71,21 +70,20 @@ func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *
 	return &wb
 }
 
-// Start starts the WebRTC bridge connection
 func (wb *WebRTCBridge) Start() error {
 	wb.mutex.Lock()
 	defer wb.mutex.Unlock()
 
 	if wb.connected {
-		return fmt.Errorf("bridge already connected")
+		return errors.New("bridge already connected")
 	}
 
-	fmt.Printf("Starting WebRTC bridge for camera: %s\n", wb.camera.DeviceName)
+	core.Logger.Info().Msgf("Starting WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
 	// Create HTTP client with session
 	httpClient := wb.createHTTPClient()
 	if httpClient == nil {
-		return fmt.Errorf("failed to create HTTP client")
+		return errors.New("failed to create HTTP client")
 	}
 
 	// Get app info
@@ -131,7 +129,7 @@ func (wb *WebRTCBridge) Start() error {
 	wb.streamType = tuya.GetStreamType(&skill, wb.resolution)
 	wb.isHEVC = tuya.IsHEVC(&skill, wb.streamType)
 
-	fmt.Printf("Stream settings - Resolution: %s, Type: %d, HEVC: %v\n", wb.resolution, wb.streamType, wb.isHEVC)
+	core.Logger.Info().Msgf("Stream settings - Resolution: %s, Type: %d, HEVC: %v", wb.resolution, wb.streamType, wb.isHEVC)
 
 	// Setup WebRTC peer connection
 	if err := wb.setupPeerConnection(&webRTCConfig.Result); err != nil {
@@ -151,12 +149,11 @@ func (wb *WebRTCBridge) Start() error {
 	}
 
 	wb.connected = true
-	fmt.Printf("WebRTC bridge started successfully for camera: %s\n", wb.camera.DeviceName)
+	core.Logger.Info().Msgf("WebRTC bridge started successfully for camera: %s", wb.camera.DeviceName)
 
 	return nil
 }
 
-// Stop stops the WebRTC bridge
 func (wb *WebRTCBridge) Stop() {
 	wb.mutex.Lock()
 	defer wb.mutex.Unlock()
@@ -165,7 +162,7 @@ func (wb *WebRTCBridge) Stop() {
 		return
 	}
 
-	fmt.Printf("Stopping WebRTC bridge for camera: %s\n", wb.camera.DeviceName)
+	core.Logger.Info().Msgf("Stopping WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
 	// Send disconnect
 	if wb.cameraClient != nil {
@@ -187,10 +184,9 @@ func (wb *WebRTCBridge) Stop() {
 	}
 
 	wb.connected = false
-	fmt.Printf("WebRTC bridge stopped for camera: %s\n", wb.camera.DeviceName)
+	core.Logger.Info().Msgf("WebRTC bridge stopped for camera: %s", wb.camera.DeviceName)
 }
 
-// IsConnected returns connection status
 func (wb *WebRTCBridge) IsConnected() bool {
 	wb.mutex.RLock()
 	defer wb.mutex.RUnlock()
@@ -203,7 +199,6 @@ func (wb *WebRTCBridge) ForwardBackchannelAudioPacket(packet *rtp.Packet) {
 	}
 }
 
-// setupPeerConnection sets up the WebRTC peer connection
 func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) error {
 	// Convert ICE servers
 	iceServerBytes, err := json.Marshal(webRTCConfig.P2PConfig.Ices)
@@ -269,18 +264,14 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 		})
 
 		wb.dataChannel.OnError(func(err error) {
-			// fmt.Printf("tuya: datachannel error: %s\n", err.Error())
 			wb.handleError(err)
 		})
 
 		wb.dataChannel.OnClose(func() {
-			// fmt.Println("tuya: datachannel closed")
 			wb.handleError(errors.New("datachannel: closed"))
 		})
 
 		wb.dataChannel.OnOpen(func() {
-			// fmt.Println("tuya: datachannel opened")
-
 			codecRequest, _ := json.Marshal(tuya.DataChannelMessage{
 				Type: "codec",
 				Msg:  "",
@@ -295,11 +286,11 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 	// Setup connection state handler
 	wb.peerConnection.OnConnectionStateChange(func(state pion.PeerConnectionState) {
 		if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed {
-			wb.handleError(fmt.Errorf("WebRTC connection failed/closed"))
+			wb.handleError(errors.New("WebRTC connection failed/closed"))
 		}
 
 		if state == pion.PeerConnectionStateConnected {
-			fmt.Printf("WebRTC connection established\n")
+			core.Logger.Info().Msgf("WebRTC connection established")
 
 			if !wb.isHEVC && wb.resolution == "hd" {
 				_ = wb.cameraClient.SendResolution(0)
@@ -311,7 +302,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 	// Setup track handler for incoming media if not HEVC
 	wb.peerConnection.OnTrack(func(track *pion.TrackRemote, receiver *pion.RTPReceiver) {
 		codec := track.Codec()
-		fmt.Printf("Received track: %s, PayloadType: %d\n", codec.MimeType, codec.PayloadType)
+		core.Logger.Debug().Msgf("Received track: %s, PayloadType: %d", codec.MimeType, codec.PayloadType)
 
 		if track.Kind() == pion.RTPCodecTypeVideo {
 			wb.videoTrack = track
@@ -331,7 +322,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 						)
 						tr.Sender().ReplaceTrack(localTrack)
 						wb.backchannel = localTrack
-						fmt.Printf("Setup backchannel track\n")
+						core.Logger.Debug().Msgf("Setup backchannel track")
 						break
 					}
 				}
@@ -346,9 +337,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 	return nil
 }
 
-// setupMQTTCameraClient sets up the MQTT camera client
 func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
-	// Convert camera info to tuya.Device
 	device := &tuya.Device{
 		DeviceId:   wb.camera.DeviceID,
 		DeviceName: wb.camera.DeviceName,
@@ -363,7 +352,8 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 
 	// Setup handlers
 	wb.cameraClient.HandleAnswer = func(answer tuya.AnswerFrame) {
-		fmt.Printf("Received WebRTC answer\n")
+		core.Logger.Debug().Msgf("Received WebRTC answer")
+		core.Logger.Debug().Msgf("Answer SDP: %s", answer.Sdp)
 
 		desc := pion.SessionDescription{
 			Type: pion.SDPTypePranswer,
@@ -371,52 +361,48 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 		}
 
 		if err := wb.peerConnection.SetRemoteDescription(desc); err != nil {
-			fmt.Printf("Error setting remote description: %v\n", err)
+			wb.handleError(err)
 			return
 		}
 
 		if err := webrtc.SetAnswer(wb.peerConnection, answer.Sdp); err != nil {
-			fmt.Printf("Error setting answer: %v\n", err)
+			wb.handleError(err)
 			return
 		}
 	}
 
 	wb.cameraClient.HandleCandidate = func(candidate tuya.CandidateFrame) {
-		fmt.Printf("Received ICE candidate: %s\n", candidate.Candidate)
+		core.Logger.Trace().Msgf("Received ICE candidate: %s", candidate.Candidate)
 
 		if candidate.Candidate != "" {
 			err := wb.peerConnection.AddICECandidate(pion.ICECandidateInit{Candidate: candidate.Candidate})
 			if err != nil {
-				fmt.Printf("Error adding ICE candidate: %v\n", err)
+				wb.handleError(err)
 			}
 		}
 	}
 
 	wb.cameraClient.HandleError = func(err error) {
-		fmt.Printf("MQTT camera client error: %v\n", err)
 		wb.handleError(err)
 	}
 
 	wb.cameraClient.HandleDisconnect = func() {
-		fmt.Printf("MQTT camera client disconnected\n")
+		wb.handleError(errors.New("camera client disconnected"))
 		wb.connected = false
 	}
 }
 
-// createAndSendOffer creates and sends WebRTC offer
 func (wb *WebRTCBridge) createAndSendOffer() error {
-	// Setup ICE candidate handler
 	wb.peerConnection.OnICECandidate(func(candidate *pion.ICECandidate) {
 		if candidate != nil {
-			fmt.Printf("Generated ICE candidate: %s\n", candidate.ToJSON().Candidate)
+			core.Logger.Debug().Msgf("Generated ICE candidate: %s", candidate.ToJSON().Candidate)
 
 			if err := wb.cameraClient.SendCandidate("a=" + candidate.ToJSON().Candidate); err != nil {
-				fmt.Printf("Error sending ICE candidate: %v\n", err)
+				core.Logger.Error().Err(err).Msg("Error sending ICE candidate")
 			}
 		}
 	})
 
-	// Create media descriptions
 	medias := []*utils.Media{
 		{Kind: utils.KindAudio, Direction: utils.DirectionSendRecv},
 		{Kind: utils.KindVideo, Direction: utils.DirectionRecvonly},
@@ -432,7 +418,7 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 	re := regexp.MustCompile(`\r\na=extmap[^\r\n]*`)
 	offer = re.ReplaceAllString(offer, "")
 
-	fmt.Printf("Sending WebRTC offer\n")
+	core.Logger.Debug().Msgf("Sending WebRTC offer")
 
 	// Send offer
 	if err := wb.cameraClient.SendOffer(offer, wb.resolution, wb.streamType, wb.isHEVC); err != nil {
@@ -442,37 +428,34 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 	return nil
 }
 
-// handleVideoTrack handles incoming video track
 func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
-	fmt.Printf("Starting video track handler\n")
+	core.Logger.Debug().Msgf("Starting video track handler")
 
 	for {
 		packet, _, err := track.ReadRTP()
 		if err != nil {
-			fmt.Printf("Error reading video RTP packet: %v\n", err)
-			break
+			core.Logger.Error().Err(err).Msg("Error reading video RTP packet")
+			continue
 		}
 
 		wb.rtpForwarder.ForwardVideoPacket(packet)
 	}
 }
 
-// handleAudioTrack handles incoming audio track
 func (wb *WebRTCBridge) handleAudioTrack(track *pion.TrackRemote) {
-	fmt.Printf("Starting audio track handler\n")
+	core.Logger.Debug().Msgf("Starting audio track handler")
 
 	for {
 		packet, _, err := track.ReadRTP()
 		if err != nil {
-			fmt.Printf("Error reading audio RTP packet: %v\n", err)
-			break
+			core.Logger.Error().Err(err).Msg("Error reading audio RTP packet")
+			continue
 		}
 
 		wb.rtpForwarder.ForwardAudioPacket(packet)
 	}
 }
 
-// createHTTPClient creates HTTP client with session cookies
 func (wb *WebRTCBridge) createHTTPClient() *http.Client {
 	jar, err := cookiejar.New(&cookiejar.Options{
 		PublicSuffixList: publicsuffix.List,
@@ -507,8 +490,6 @@ func (wb *WebRTCBridge) createHTTPClient() *http.Client {
 }
 
 func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
-	// fmt.Printf("[tuya] Received string message: %s\n", string(msg.Data))
-
 	var message tuya.DataChannelMessage
 	if err := json.Unmarshal([]byte(msg.Data), &message); err != nil {
 		return false, err
@@ -553,7 +534,6 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 
 func (wb *WebRTCBridge) sendMessageToDataChannel(message []byte) error {
 	if wb.dataChannel != nil {
-		// fmt.Printf("[tuya] sending message to data channel: %s\n", message)
 		return wb.dataChannel.Send(message)
 	}
 
@@ -562,6 +542,7 @@ func (wb *WebRTCBridge) sendMessageToDataChannel(message []byte) error {
 
 func (wb *WebRTCBridge) handleError(err error) {
 	if wb.OnError != nil {
+		wb.waiter.Done(err)
 		wb.OnError(err)
 	}
 }

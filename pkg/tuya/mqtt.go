@@ -2,34 +2,22 @@ package tuya
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/utils"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type MQTTClient struct {
-	mqtt mqtt.Client
-
-	// auth      string
-	uid string
-	// motoId    string
-	// deviceId  string
-	// sessionId string
-	Connected utils.Waiter
-
-	// publishTopic   string
+	mqtt           mqtt.Client
+	uid            string
 	subscribeTopic string
-
-	// handleAnswer     func(answer AnswerFrame)
-	// handleCandidate  func(candidate CandidateFrame)
-	// handleDisconnect func()
-	// handleError      func(err error)
-
-	cameras map[string]*MQTTCameraClient // sessionId -> camera
-
-	closed bool
+	cameras        map[string]*MQTTCameraClient // sessionId -> camera
+	closed         bool
+	Connected      utils.Waiter
 }
 
 type MqttFrameHeader struct {
@@ -56,10 +44,8 @@ type MqttMessage struct {
 	Data     MqttFrame `json:"data"`
 }
 
-// Create main MQTT Client
 func NewMqttClient(clientId, mobileMqttsUrl string, mqttConfig *MQTConfig) (*MQTTClient, error) {
 	client := &MQTTClient{
-		// sessionId: utils.RandString(6, 62),
 		uid:            mqttConfig.Msid,
 		subscribeTopic: fmt.Sprintf("/av/u/%s", mqttConfig.Msid),
 		Connected:      utils.Waiter{},
@@ -112,15 +98,15 @@ func (c *MQTTClient) RemoveCameraClient(sessionId string) {
 }
 
 func (c *MQTTClient) onConnect(client mqtt.Client) {
-	fmt.Printf("Connected to mqtt broker\n")
-	fmt.Printf("Subscribing to topic: %s\n", c.subscribeTopic)
+	core.Logger.Debug().Msgf("Connected to mqtt broker")
+	core.Logger.Debug().Msgf("Subscribing to topic: %s", c.subscribeTopic)
 
 	if token := client.Subscribe(c.subscribeTopic, 1, c.consume); token.Wait() && token.Error() != nil {
 		c.Connected.Done(token.Error())
 		return
 	}
 
-	fmt.Printf("Subscribed")
+	core.Logger.Debug().Msgf("Subscribed")
 	c.Connected.Done(nil)
 }
 
@@ -128,7 +114,7 @@ func (c *MQTTClient) onDisconnect(client mqtt.Client, err error) {
 	if err != nil {
 		c.Connected.Done(err)
 	} else {
-		c.Connected.Done(fmt.Errorf("mqtt client disconnected"))
+		c.Connected.Done(errors.New("mqtt client disconnected"))
 	}
 
 	c.closed = true
@@ -137,14 +123,14 @@ func (c *MQTTClient) onDisconnect(client mqtt.Client, err error) {
 func (c *MQTTClient) consume(client mqtt.Client, msg mqtt.Message) {
 	var rmqtt MqttMessage
 	if err := json.Unmarshal(msg.Payload(), &rmqtt); err != nil {
-		fmt.Printf("Failed to unmarshal mqtt message: %s\n", err)
+		core.Logger.Error().Err(err).Msg("Failed to unmarshal mqtt message: %s")
 		return
 	}
 
 	sessionId := rmqtt.Data.Header.SessionID
 	cameraClient, ok := c.cameras[sessionId]
 	if !ok {
-		fmt.Printf("No camera client found for sessionId: %s\n", sessionId)
+		core.Logger.Warn().Msgf("No camera client found for sessionId: %s", sessionId)
 		return
 	}
 

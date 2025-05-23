@@ -295,8 +295,6 @@ If you get authentication errors:
 
 3. Check if cameras are online in the Tuya Smart app
 
-Note: Shared cameras are not supported.
-
 ### RTSP Connection Issues
 
 1. Check server status:

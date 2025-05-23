@@ -3,6 +3,7 @@ package tuya
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -112,6 +113,21 @@ type HomeListResponse struct {
 	T       int64  `json:"t"`
 	Success bool   `json:"success"`
 	Msg     string `json:"errorMsg,omitempty"`
+}
+
+type SharedHomeListResponse struct {
+	Result  SharedHome `json:"result"`
+	T       int64      `json:"t"`
+	Success bool       `json:"success"`
+	Msg     string     `json:"errorMsg,omitempty"`
+}
+
+type SharedHome struct {
+	SecurityWebCShareInfoList []struct {
+		DeviceInfoList []Device `json:"deviceInfoList"`
+		Nickname       string   `json:"nickname"`
+		Username       string   `json:"username"`
+	} `json:"securityWebCShareInfoList"`
 }
 
 type Home struct {
@@ -348,7 +364,7 @@ func PollForLogin(client *http.Client, serverHost string, token string) (*LoginR
 		time.Sleep(1 * time.Second)
 	}
 
-	return nil, fmt.Errorf("timeout waiting for QR code scan")
+	return nil, errors.New("timeout waiting for QR code scan")
 }
 
 func GetAppInfo(client *http.Client, serverHost string) (*AppInfoResponse, error) {
@@ -427,7 +443,7 @@ func GetMQTTConfig(client *http.Client, serverHost string) (*MQTTConfigResponse,
 	}
 
 	if !mqttConfigResponse.Success {
-		return nil, fmt.Errorf("failed to get MQTT config")
+		return nil, fmt.Errorf("failed to get MQTT config: %s", mqttConfigResponse.Msg)
 	}
 
 	return &mqttConfigResponse, nil
@@ -523,6 +539,47 @@ func GetHomeList(client *http.Client, serverHost string) (*HomeListResponse, err
 	}
 
 	return &homeListResponse, nil
+}
+
+func GetSharedHomeList(client *http.Client, serverHost string) (*SharedHomeListResponse, error) {
+	url := fmt.Sprintf("https://%s/api/new/playback/shareList", serverHost)
+
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", fmt.Sprintf("https://%s", serverHost))
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/playback", serverHost))
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP error: %d - %s", resp.StatusCode, string(body))
+	}
+
+	var sharedHomeListResponse SharedHomeListResponse
+	if err := json.Unmarshal(body, &sharedHomeListResponse); err != nil {
+		return nil, err
+	}
+
+	if !sharedHomeListResponse.Success {
+		return nil, fmt.Errorf("failed to get shared home list: %s", sharedHomeListResponse.Msg)
+	}
+
+	return &sharedHomeListResponse, nil
 }
 
 func GetRoomList(client *http.Client, serverHost string, homeId string) (*RoomListResponse, error) {

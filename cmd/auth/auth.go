@@ -39,7 +39,7 @@ func NewAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage Tuya user authentication",
-		Long:  `Commands to add, remove, list, and manage Tuya Smart account authentication.
+		Long: `Commands to add, remove, list, and manage Tuya Smart account authentication.
 
 Available Regions:
 - eu-central (Central Europe)
@@ -138,6 +138,7 @@ func runListUsers(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Found %d authenticated user(s):\n\n", len(users))
+
 	for i, user := range users {
 		status := "✓ Valid"
 		if user.SessionData == nil {
@@ -146,12 +147,12 @@ func runListUsers(cmd *cobra.Command, args []string) error {
 			status = "⚠ Old (>7 days)"
 		}
 
-		fmt.Printf("%d. %s (%s)\n", i+1, user.Email, user.Region)
-		fmt.Printf("   Status: %s\n", status)
-		fmt.Printf("   Last refresh: %s\n", user.LastRefresh.Format("2006-01-02 15:04:05"))
+		fmt.Printf("User %d: %s (%s)\n", i+1, user.Email, user.Region)
+		fmt.Printf("  Status: %s\n", status)
+		fmt.Printf("  Last refresh: %s\n", user.LastRefresh.Format("2006-01-02 15:04:05"))
 		if user.SessionData != nil {
-			fmt.Printf("   User ID: %s\n", user.SessionData.LoginResult.Uid)
-			fmt.Printf("   Nickname: %s\n", user.SessionData.LoginResult.Nickname)
+			fmt.Printf("  User ID: %s\n", user.SessionData.LoginResult.Uid)
+			fmt.Printf("  Nickname: %s\n", user.SessionData.LoginResult.Nickname)
 		}
 		fmt.Println()
 	}
@@ -174,11 +175,12 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 	}
 
 	if selectedRegion == nil {
-		fmt.Printf("Invalid region: %s\n\n", regionName)
+		fmt.Printf("Invalid region: %s\n", regionName)
 		fmt.Println("Available regions:")
 		for _, region := range availableRegions {
 			fmt.Printf("  %s - %s\n", region.Name, region.Description)
 		}
+
 		return fmt.Errorf("invalid region")
 	}
 
@@ -195,7 +197,8 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 
 	if existingUser != nil {
 		fmt.Printf("User %s in region %s already exists.\n", email, regionName)
-		fmt.Print("Do you want to re-authenticate? (y/N): ")
+		fmt.Println("Do you want to re-authenticate? (y/N): ")
+
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
@@ -203,7 +206,7 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("Adding user %s in region %s (%s)...\n\n", email, regionName, selectedRegion.Description)
+	fmt.Printf("Adding user %s in region %s (%s)...\n", email, regionName, selectedRegion.Description)
 
 	// Perform authentication
 	sessionData, err := performAuthentication(*selectedRegion, email)
@@ -238,7 +241,7 @@ func runRemoveUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("user %s in region %s not found", email, regionName)
 	}
 
-	fmt.Printf("Are you sure you want to remove user %s (%s)? (y/N): ", email, regionName)
+	fmt.Printf("Are you sure you want to remove user %s (%s)? (y/N):\n", email, regionName)
 	var response string
 	fmt.Scanln(&response)
 	if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
@@ -282,7 +285,7 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("user %s in region %s not found", email, regionName)
 	}
 
-	fmt.Printf("Refreshing session for user %s in region %s...\n\n", email, regionName)
+	fmt.Printf("Refreshing session for user %s in region %s...\n", email, regionName)
 
 	// Perform authentication
 	sessionData, err := performAuthentication(*selectedRegion, email)
@@ -295,7 +298,7 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save user session: %v", err)
 	}
 
-	fmt.Printf("\n✓ Successfully refreshed session for user %s (%s)\n",
+	fmt.Printf("✓ Successfully refreshed session for user %s (%s)\n",
 		sessionData.LoginResult.Nickname, email)
 
 	return nil
@@ -328,7 +331,7 @@ func runTestUser(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Testing session for %s (%s)...\n", email, regionName)
+	fmt.Printf("Testing session for %s (%s)...", email, regionName)
 
 	_, err = tuya.GetAppInfo(httpClient, user.SessionData.ServerHost)
 	if err != nil {
@@ -375,9 +378,9 @@ func performAuthentication(region tuya.Region, email string) (*tuya.SessionData,
 
 	// Check if logged in email matches expected
 	if loginResult.Email != email {
-		fmt.Printf("Warning: Logged in with different email than expected!\n")
+		fmt.Println("Logged in with different email than expected!")
 		fmt.Printf("Expected: %s, Got: %s\n", email, loginResult.Email)
-		fmt.Print("Continue anyway? (y/N): ")
+		fmt.Println("Continue anyway? (y/N): ")
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {

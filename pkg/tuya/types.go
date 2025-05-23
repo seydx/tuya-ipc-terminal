@@ -2,14 +2,12 @@ package tuya
 
 import "time"
 
-// Region configuration
 type Region struct {
 	Name        string `json:"name"`
 	Host        string `json:"host"`
 	Description string `json:"description"`
 }
 
-// Cookie for serialization
 type Cookie struct {
 	Name     string    `json:"name"`
 	Value    string    `json:"value"`
@@ -20,7 +18,6 @@ type Cookie struct {
 	HttpOnly bool      `json:"httpOnly"`
 }
 
-// SessionData contains all persistent authentication data
 type SessionData struct {
 	LoginResult   *LoginResult `json:"loginResult"`
 	Cookies       []*Cookie    `json:"cookies"`

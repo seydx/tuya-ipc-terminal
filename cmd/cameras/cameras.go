@@ -1,6 +1,7 @@
 package cameras
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
@@ -156,7 +157,7 @@ func runRefreshCameras(cmd *cobra.Command, args []string) error {
 		successfulUsers++
 	}
 
-	fmt.Printf("\n✓ Discovery complete!\n")
+	fmt.Printf("✓ Discovery complete!\n")
 	fmt.Printf("Successfully processed %d/%d users\n", successfulUsers, len(users))
 	fmt.Printf("Total cameras discovered: %d\n", totalCameras)
 
@@ -185,7 +186,7 @@ func runCameraInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Camera Information:\n")
-	fmt.Printf("==================\n\n")
+	fmt.Printf("==================\n")
 	fmt.Printf("Name: %s\n", targetCamera.DeviceName)
 	fmt.Printf("Device ID: %s\n", targetCamera.DeviceID)
 	fmt.Printf("UUID: %s\n", targetCamera.UUID)
@@ -194,23 +195,23 @@ func runCameraInfo(cmd *cobra.Command, args []string) error {
 	fmt.Printf("User: %s\n", targetCamera.UserKey)
 	fmt.Printf("RTSP Path: %s\n", targetCamera.RTSPPath)
 
-	fmt.Printf("\nFetching additional information...\n")
+	fmt.Printf("Fetching additional information...\n")
 
 	user, err := getUserFromKey(targetCamera.UserKey)
 	if err != nil {
-		fmt.Printf("Warning: Could not load user info: %v\n", err)
+		fmt.Printf("Could not load user info: %v\n", err)
 		return nil
 	}
 
 	httpClient := createHTTPClientWithSession(user.SessionData)
 	if httpClient == nil {
-		fmt.Printf("Warning: Could not create HTTP client\n")
+		fmt.Println("Could not create HTTP client")
 		return nil
 	}
 
 	webRTCConfig, err := tuya.GetWebRTCConfig(httpClient, user.SessionData.ServerHost, targetCamera.DeviceID)
 	if err != nil {
-		fmt.Printf("Warning: Could not get WebRTC config: %v\n", err)
+		fmt.Printf("Could not get WebRTC config: %v\n", err)
 		return nil
 	}
 
@@ -228,12 +229,12 @@ func runCameraInfo(cmd *cobra.Command, args []string) error {
 // discoverCamerasForUser discovers cameras for a specific user
 func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, error) {
 	if user.SessionData == nil {
-		return nil, fmt.Errorf("user has no valid session data")
+		return nil, errors.New("user has no valid session data")
 	}
 
 	httpClient := createHTTPClientWithSession(user.SessionData)
 	if httpClient == nil {
-		return nil, fmt.Errorf("failed to create HTTP client")
+		return nil, errors.New("failed to create HTTP client")
 	}
 
 	// Test session validity first
@@ -242,56 +243,71 @@ func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, er
 		return nil, fmt.Errorf("session is invalid: %v", err)
 	}
 
+	var devices []tuya.Device
+
 	// Get home list
-	homes, err := tuya.GetHomeList(httpClient, user.SessionData.ServerHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home list: %v", err)
+	homes, _ := tuya.GetHomeList(httpClient, user.SessionData.ServerHost)
+	if homes != nil && len(homes.Result) > 0 {
+		for _, home := range homes.Result {
+			// Get room list with devices
+			roomList, err := tuya.GetRoomList(httpClient, user.SessionData.ServerHost, strconv.Itoa(home.Gid))
+			if err != nil {
+				continue // Skip this home if we can't get rooms
+			}
+
+			// Extract cameras from rooms
+			for _, room := range roomList.Result {
+				for _, device := range room.DeviceList {
+					// Check if device is a camera (sp = smart camera, dghsxj = another camera type)
+					if (device.Category == "sp" || device.Category == "dghsxj") && !containsDevice(devices, device.DeviceId) {
+						devices = append(devices, device)
+					}
+				}
+			}
+		}
 	}
 
-	if len(homes.Result) == 0 {
+	// Get shared home list
+	sharedHomes, _ := tuya.GetSharedHomeList(httpClient, user.SessionData.ServerHost)
+	if sharedHomes != nil && len(sharedHomes.Result.SecurityWebCShareInfoList) > 0 {
+
+		// Extract cameras from shared homes
+		for _, sharedHome := range sharedHomes.Result.SecurityWebCShareInfoList {
+			for _, device := range sharedHome.DeviceInfoList {
+				// Check if device is a camera (sp = smart camera, dghsxj = another camera type)
+				if (device.Category == "sp" || device.Category == "dghsxj") && !containsDevice(devices, device.DeviceId) {
+					devices = append(devices, device)
+				}
+			}
+		}
+	}
+
+	if len(devices) == 0 {
 		return []storage.CameraInfo{}, nil
 	}
 
 	var allCameras []storage.CameraInfo
 
-	for _, home := range homes.Result {
-		// Get room list with devices
-		roomList, err := tuya.GetRoomList(httpClient, user.SessionData.ServerHost, strconv.Itoa(home.Gid))
+	for _, device := range devices {
+		webrtcConfig, err := tuya.GetWebRTCConfig(httpClient, user.SessionData.ServerHost, device.DeviceId)
 		if err != nil {
-			continue // Skip this home if we can't get rooms
+			continue // Skip if we can't get WebRTC config
 		}
 
-		// Extract cameras from rooms
-		for _, room := range roomList.Result {
-			for _, device := range room.DeviceList {
-				// Check if device is a camera (sp = smart camera, dghsxj = another camera type)
-				if device.Category == "sp" || device.Category == "dghsxj" {
-					if containsCamera(allCameras, device.DeviceId) {
-						continue // Skip if camera already exists
-					}
+		rtspPath := storageManager.GenerateRTSPPath(device.DeviceName, device.DeviceId)
 
-					webrtcConfig, err := tuya.GetWebRTCConfig(httpClient, user.SessionData.ServerHost, device.DeviceId)
-					if err != nil {
-						continue // Skip if we can't get WebRTC config
-					}
-
-					rtspPath := storageManager.GenerateRTSPPath(device.DeviceName, device.DeviceId)
-
-					camera := storage.CameraInfo{
-						UserKey:    user.UserKey,
-						DeviceID:   device.DeviceId,
-						DeviceName: device.DeviceName,
-						Category:   device.Category,
-						RTSPPath:   rtspPath,
-						ProductID:  device.ProductId,
-						UUID:       device.Uuid,
-						Skill:      webrtcConfig.Result.Skill,
-					}
-
-					allCameras = append(allCameras, camera)
-				}
-			}
+		camera := storage.CameraInfo{
+			UserKey:    user.UserKey,
+			DeviceID:   device.DeviceId,
+			DeviceName: device.DeviceName,
+			Category:   device.Category,
+			RTSPPath:   rtspPath,
+			ProductID:  device.ProductId,
+			UUID:       device.Uuid,
+			Skill:      webrtcConfig.Result.Skill,
 		}
+
+		allCameras = append(allCameras, camera)
 	}
 
 	return allCameras, nil
@@ -347,10 +363,10 @@ func getUserFromKey(userKey string) (*storage.UserSession, error) {
 	return nil, fmt.Errorf("user not found for key: %s", userKey)
 }
 
-// containsCamera checks if a camera with the given device ID exists in the list
-func containsCamera(storageCameras []storage.CameraInfo, deviceID string) bool {
-	for _, cam := range storageCameras {
-		if cam.DeviceID == deviceID {
+// containsDevice checks if a device is in the list of devices
+func containsDevice(devices []tuya.Device, deviceID string) bool {
+	for _, device := range devices {
+		if device.DeviceId == deviceID {
 			return true
 		}
 	}

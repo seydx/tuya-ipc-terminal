@@ -9,16 +9,17 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/storage"
 	"tuya-ipc-terminal/pkg/tuya"
 
 	"github.com/pion/rtp"
 )
 
-// RTSPRequest represents an RTSP request
 type RTSPRequest struct {
 	Method  string
 	URL     string
@@ -27,7 +28,6 @@ type RTSPRequest struct {
 	CSeq    int
 }
 
-// RTSPResponse represents an RTSP response
 type RTSPResponse struct {
 	Version    string
 	StatusCode int
@@ -36,111 +36,53 @@ type RTSPResponse struct {
 	Body       string
 }
 
-// parseRTSPRequest parses an RTSP request from connection
-func parseRTSPRequest(conn net.Conn) (*RTSPRequest, error) {
-	reader := bufio.NewReader(conn)
+func sendRTSPResponse(conn net.Conn, statusCode int, status string, headers map[string]string, body string) error {
+	var response strings.Builder
 
-	// Read request line
-	line, _, err := reader.ReadLine()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read request line: %v", err)
-	}
-
-	parts := strings.Split(string(line), " ")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid request line: %s", string(line))
-	}
-
-	request := &RTSPRequest{
-		Method:  parts[0],
-		URL:     parts[1],
-		Version: parts[2],
-		Headers: make(map[string]string),
-	}
-
-	// Read headers
-	for {
-		line, _, err := reader.ReadLine()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read header: %v", err)
-		}
-
-		lineStr := string(line)
-		if lineStr == "" {
-			break // End of headers
-		}
-
-		// Parse header
-		colonIndex := strings.Index(lineStr, ":")
-		if colonIndex == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(lineStr[:colonIndex])
-		value := strings.TrimSpace(lineStr[colonIndex+1:])
-		request.Headers[key] = value
-
-		// Extract CSeq
-		if strings.ToLower(key) == "cseq" {
-			if cseq, err := strconv.Atoi(value); err == nil {
-				request.CSeq = cseq
-			}
-		}
-	}
-
-	return request, nil
-}
-
-// sendRTSPResponse sends an RTSP response
-func sendRTSPResponse(conn net.Conn, statusCode int, status string, body string) error {
-	response := fmt.Sprintf("RTSP/1.0 %d %s\r\n", statusCode, status)
-	response += fmt.Sprintf("Server: TuyaIPCTerminal/1.0\r\n")
-	response += fmt.Sprintf("Date: %s\r\n", time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
-
-	if body != "" {
-		response += fmt.Sprintf("Content-Length: %d\r\n", len(body))
-		response += fmt.Sprintf("Content-Type: text/plain\r\n")
-	}
-
-	response += "\r\n"
-
-	if body != "" {
-		response += body
-	}
-
-	_, err := conn.Write([]byte(response))
-	return err
-}
-
-// sendRTSPResponseWithHeaders sends an RTSP response with custom headers
-func sendRTSPResponseWithHeaders(conn net.Conn, statusCode int, status string, headers map[string]string, body string) error {
-	response := fmt.Sprintf("RTSP/1.0 %d %s\r\n", statusCode, status)
-	response += fmt.Sprintf("Server: TuyaIPCTerminal/1.0\r\n")
-	response += fmt.Sprintf("Date: %s\r\n", time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
+	// Status line
+	fmt.Fprintf(&response, "RTSP/1.0 %d %s\r\n", statusCode, status)
+	fmt.Fprintf(&response, "Server: TuyaIPCTerminal/1.0\r\n")
+	fmt.Fprintf(&response, "Date: %s\r\n", time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
 
 	// Add custom headers
 	for key, value := range headers {
-		response += fmt.Sprintf("%s: %s\r\n", key, value)
+		fmt.Fprintf(&response, "%s: %s\r\n", key, value)
 	}
 
+	// Content headers if body exists
 	if body != "" {
-		response += fmt.Sprintf("Content-Length: %d\r\n", len(body))
-		response += fmt.Sprintf("Content-Type: application/sdp\r\n")
+		fmt.Fprintf(&response, "Content-Length: %d\r\n", len(body))
+		if _, hasContentType := headers["Content-Type"]; !hasContentType {
+			fmt.Fprintf(&response, "Content-Type: application/sdp\r\n")
+		}
 	}
 
-	response += "\r\n"
+	// Empty line to separate headers from body
+	response.WriteString("\r\n")
 
+	// Add body if present
 	if body != "" {
-		response += body
+		response.WriteString(body)
 	}
 
-	_, err := conn.Write([]byte(response))
+	responseStr := response.String()
+
+	fmt.Println()
+	core.Logger.Debug().Msgf("Sending RTSP response:")
+	re := regexp.MustCompile(`\r\n|\r|\n`)
+	lines := re.Split(responseStr, -1)
+	for _, line := range lines {
+		if line != "" {
+			fmt.Println(line)
+		}
+	}
+	fmt.Println()
+
+	_, err := conn.Write([]byte(responseStr))
 	return err
 }
 
-// extractCameraPath extracts camera path from RTSP URL
 func extractCameraPath(rtspURL string) (string, string) {
-	// Parse URL
 	parsed, err := url.Parse(rtspURL)
 	if err != nil {
 		return "", ""
@@ -166,46 +108,41 @@ func extractCameraPath(rtspURL string) (string, string) {
 	return path, streamResolution
 }
 
-// generateSessionID generates a random session ID
 func generateSessionID() string {
 	bytes := make([]byte, 8)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
 }
 
-// handleRTSPProtocol handles the RTSP protocol for a client
-func (s *RTSPServer) handleRTSPProtocol(client *RTSPClient, initialRequest *RTSPRequest) {
+func (s *RTSPServer) handleRTSPProtocol(client *RTSPClient) {
 	defer s.removeClient(client.session)
-
-	s.handleRTSPMethod(client, initialRequest)
 
 	for {
 		client.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-		// Check für interleaved RTP (backchannel)
-		reader := bufio.NewReader(client.conn)
-		firstByte, err := reader.Peek(1)
+		// Check for interleaved RTP (backchannel)
+		firstByte, err := client.reader.Peek(1)
 		if err != nil {
 			if !strings.Contains(err.Error(), "timeout") {
-				fmt.Printf("Error peeking connection: %v\n", err)
+				core.Logger.Error().Err(err).Msg("Error peeking connection")
 			}
 			break
 		}
 
 		// Handle interleaved RTP packet
 		if len(firstByte) > 0 && firstByte[0] == '$' {
-			if err := s.handleInterleavedRTP(client, reader); err != nil {
-				fmt.Printf("Error handling interleaved RTP: %v\n", err)
+			if err := s.handleInterleavedRTP(client); err != nil {
+				core.Logger.Error().Err(err).Msg("Error handling interleaved RTP")
 				break
 			}
 			continue
 		}
 
 		// Handle regular RTSP request
-		request, err := s.parseRTSPRequestFromReader(reader)
+		request, err := s.parseRTSPRequestFromReader(client.reader)
 		if err != nil {
 			if !strings.Contains(err.Error(), "timeout") {
-				fmt.Printf("Error parsing RTSP request: %v\n", err)
+				core.Logger.Error().Err(err).Msg("Error parsing RTSP request")
 			}
 			break
 		}
@@ -214,11 +151,10 @@ func (s *RTSPServer) handleRTSPProtocol(client *RTSPClient, initialRequest *RTSP
 	}
 }
 
-// handleInterleavedRTP handles interleaved RTP packets
-func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient, reader *bufio.Reader) error {
+func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient) error {
 	// Read interleaved header: $ + channel + length(2 bytes)
 	header := make([]byte, 4)
-	if _, err := io.ReadFull(reader, header); err != nil {
+	if _, err := io.ReadFull(client.reader, header); err != nil {
 		return fmt.Errorf("failed to read interleaved header: %v", err)
 	}
 
@@ -231,14 +167,12 @@ func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient, reader *bufio.Read
 
 	// Read RTP data
 	data := make([]byte, length)
-	if _, err := io.ReadFull(reader, data); err != nil {
+	if _, err := io.ReadFull(client.reader, data); err != nil {
 		return fmt.Errorf("failed to read RTP data: %v", err)
 	}
 
 	// Check if this is backchannel
-	if channel == client.backchannelAudioChannel {
-		// fmt.Printf("Received backchannel RTP packet on channel %d\n", channel)
-
+	if channel == client.backAudioChannel {
 		// Parse und forward backchannel packet
 		packet := &rtp.Packet{}
 		if err := packet.Unmarshal(data); err != nil {
@@ -256,7 +190,6 @@ func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient, reader *bufio.Read
 	return nil
 }
 
-// parseRTSPRequestFromReader parses an RTSP request from a buffered reader
 func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequest, error) {
 	// Read request line
 	line, _, err := reader.ReadLine()
@@ -306,10 +239,17 @@ func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequ
 		}
 	}
 
+	fmt.Println()
+	core.Logger.Debug().Msg("Received RTSP request:")
+	fmt.Printf("%s %s %s\n", request.Method, request.URL, request.Version)
+	for key, value := range request.Headers {
+		fmt.Printf("%s: %s\n", key, value)
+	}
+	fmt.Println()
+
 	return request, nil
 }
 
-// handleRTSPMethod handles different RTSP methods
 func (s *RTSPServer) handleRTSPMethod(client *RTSPClient, request *RTSPRequest) {
 	switch request.Method {
 	case "OPTIONS":
@@ -327,17 +267,15 @@ func (s *RTSPServer) handleRTSPMethod(client *RTSPClient, request *RTSPRequest) 
 	}
 }
 
-// handleOptions handles OPTIONS request
 func (s *RTSPServer) handleOptions(client *RTSPClient, request *RTSPRequest) {
 	headers := map[string]string{
 		"CSeq":   strconv.Itoa(request.CSeq),
 		"Public": "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN",
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 200, "OK", headers, "")
+	sendRTSPResponse(client.conn, 200, "OK", headers, "")
 }
 
-// handleDescribe handles DESCRIBE request
 func (s *RTSPServer) handleDescribe(client *RTSPClient, request *RTSPRequest) {
 	// Generate SDP for the camera stream
 	sdp := s.generateSDP(client.stream.camera, request.URL)
@@ -348,15 +286,13 @@ func (s *RTSPServer) handleDescribe(client *RTSPClient, request *RTSPRequest) {
 		"Cache-Control": "no-cache",
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 200, "OK", headers, sdp)
+	sendRTSPResponse(client.conn, 200, "OK", headers, sdp)
 }
 
-// handleSetup handles SETUP request
 func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
-	// Parse transport header
 	transport := request.Headers["Transport"]
 	if transport == "" {
-		sendRTSPResponse(client.conn, 400, "Bad Request", "Transport header missing")
+		sendRTSPResponse(client.conn, 400, "Bad Request", nil, "Transport header missing")
 		return
 	}
 
@@ -364,7 +300,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 	isVideoTrack := strings.Contains(request.URL, "/video")
 	isAudioTrack := strings.Contains(request.URL, "/audio")
 
-	fmt.Printf("Setup track - Video: %v, Audio: %v, Backchannel: %v\n", isVideoTrack, isAudioTrack, isBackchannel)
+	core.Logger.Debug().Msgf("Setup track - Video: %v, Audio: %v, Backchannel: %v", isVideoTrack, isAudioTrack, isBackchannel)
 
 	var responseTransport string
 
@@ -394,7 +330,6 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 				}
 			}
 		} else {
-			// Assign default channels if not specified
 			if isVideoTrack {
 				rtpChannel = 0  // Video RTP
 				rtcpChannel = 1 // Video RTCP
@@ -407,20 +342,29 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 			}
 		}
 
-		// Set the appropriate channel for this track
 		if isVideoTrack {
 			client.videoChannel = rtpChannel
-			fmt.Printf("Setup VIDEO track - RTP channel: %d, RTCP channel: %d\n", rtpChannel, rtcpChannel)
+			core.Logger.Debug().Msgf("Setup video track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		} else if isAudioTrack {
 			client.audioChannel = rtpChannel
-			fmt.Printf("Setup AUDIO track - RTP channel: %d, RTCP channel: %d\n", rtpChannel, rtcpChannel)
+			core.Logger.Debug().Msgf("Setup audio track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		} else if isBackchannel {
-			client.backchannelAudioChannel = rtpChannel
-			fmt.Printf("Setup BACKCHANNEL track - RTP channel: %d, RTCP channel: %d\n", rtpChannel, rtcpChannel)
+			client.backAudioChannel = rtpChannel
+			core.Logger.Debug().Msgf("Setup backchannel track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		}
 
 		responseTransport = fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d",
 			rtpChannel, rtcpChannel)
+
+		// For TCP, add/update client after each setup
+		err := client.stream.webrtcBridge.rtpForwarder.AddTCPClient(client.session, client.conn,
+			client.videoChannel, client.audioChannel, client.backAudioChannel)
+		if err != nil {
+			core.Logger.Error().Err(err).Msg("Error adding TCP RTP client")
+			sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
+				"Failed to setup RTP forwarding")
+			return
+		}
 
 	} else if strings.Contains(transport, "RTP/AVP") {
 		// UDP mode
@@ -442,55 +386,68 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 		}
 
 		if clientRTPPort == 0 {
-			sendRTSPResponse(client.conn, 400, "Bad Request", "Invalid client ports")
+			sendRTSPResponse(client.conn, 400, "Bad Request", nil, "Invalid client ports")
 			return
 		}
 
-		// Determine if this is video or audio setup
-		isVideoTrack := strings.Contains(request.URL, "/video") || !strings.Contains(request.URL, "/audio")
+		// Default server ports (used for non-backchannel tracks)
+		var serverRTPPort, serverRTCPPort int = 0, 0
+
+		// Store client ports based on track type
 		if isVideoTrack {
 			client.videoPort = clientRTPPort
 		} else if isAudioTrack {
 			client.audioPort = clientRTPPort
 		} else if isBackchannel {
-			client.backchannelAudioPort = clientRTPPort
+			// For backchannel, setup the server listener and get actual server port
+			if client.stream != nil && client.stream.webrtcBridge != nil {
+				port, err := client.stream.webrtcBridge.rtpForwarder.SetupUDPBackchannel(
+					client.session, clientRTPPort)
+				if err != nil {
+					core.Logger.Error().Err(err).Msg("Failed to setup UDP backchannel")
+					sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
+						"Failed to setup backchannel")
+					return
+				}
+				serverRTPPort = port
+				serverRTCPPort = port + 1
+			}
 		}
 
-		responseTransport = fmt.Sprintf("RTP/AVP;unicast;client_port=%d-%d;server_port=8000-8001",
-			clientRTPPort, clientRTCPPort)
+		// Build response transport
+		if serverRTPPort > 0 {
+			// Include server ports for backchannel
+			responseTransport = fmt.Sprintf("RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d",
+				clientRTPPort, clientRTCPPort, serverRTPPort, serverRTCPPort)
+		} else {
+			// No server ports for video/audio (we're only receiving)
+			responseTransport = fmt.Sprintf("RTP/AVP;unicast;client_port=%d-%d",
+				clientRTPPort, clientRTCPPort)
+		}
 
-		fmt.Printf("UDP setup - Video port: %d, Audio port: %d\n",
+		core.Logger.Debug().Msgf("UDP setup - Track type: video=%v audio=%v backchannel=%v, Client port: %d, Server port: %d",
+			isVideoTrack, isAudioTrack, isBackchannel, clientRTPPort, serverRTPPort)
+
+		// Add/update UDP client with current ports
+		err := client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
 			client.videoPort, client.audioPort)
+		if err != nil {
+			core.Logger.Error().Err(err).Msg("Error adding UDP RTP client")
+			sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
+				"Failed to setup RTP forwarding")
+			return
+		}
 
 	} else {
-		sendRTSPResponse(client.conn, 461, "Unsupported Transport", "Only RTP/AVP and RTP/AVP/TCP supported")
+		sendRTSPResponse(client.conn, 461, "Unsupported Transport", nil,
+			"Only RTP/AVP and RTP/AVP/TCP supported")
 		return
 	}
 
 	// Increment setup count
 	client.setupCount++
-	fmt.Printf("Client %s setup count: %d (video ch:%d, audio ch:%d)\n",
-		client.session, client.setupCount, client.videoChannel, client.audioChannel)
 
-	// Add/update client in RTP forwarder
-	var err error
-	if client.transportMode == TransportTCP {
-		// For TCP, add/update client after each setup
-		err = client.stream.webrtcBridge.rtpForwarder.AddTCPClient(client.session, client.conn,
-			client.videoChannel, client.audioChannel)
-	} else if client.transportMode == TransportUDP {
-		// For UDP, wait until we have both ports
-		if client.videoPort > 0 && client.audioPort > 0 {
-			err = client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
-				client.videoPort, client.audioPort)
-		}
-	}
-
-	if err != nil {
-		fmt.Printf("Error adding RTP client: %v\n", err)
-		sendRTSPResponse(client.conn, 500, "Internal Server Error", "Failed to setup RTP forwarding")
-		return
-	}
+	core.Logger.Debug().Msgf("Client %s setup count: %d", client.session, client.setupCount)
 
 	headers := map[string]string{
 		"CSeq":      strconv.Itoa(request.CSeq),
@@ -498,15 +455,14 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 		"Session":   client.session + ";timeout=60",
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 200, "OK", headers, "")
+	sendRTSPResponse(client.conn, 200, "OK", headers, "")
 }
 
-// handlePlay handles PLAY request
 func (s *RTSPServer) handlePlay(client *RTSPClient, request *RTSPRequest) {
 	// Validate session
 	sessionHeader := request.Headers["Session"]
 	if sessionHeader == "" || !strings.Contains(sessionHeader, client.session) {
-		sendRTSPResponse(client.conn, 454, "Session Not Found", "")
+		sendRTSPResponse(client.conn, 454, "Session Not Found", nil, "")
 		return
 	}
 
@@ -517,31 +473,28 @@ func (s *RTSPServer) handlePlay(client *RTSPClient, request *RTSPRequest) {
 		"RTP-Info": fmt.Sprintf("url=%s;seq=1;rtptime=0", request.URL),
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 200, "OK", headers, "")
+	sendRTSPResponse(client.conn, 200, "OK", headers, "")
 
-	// Start streaming (this would typically start RTP packet transmission)
-	fmt.Printf("Starting RTSP stream for client %s\n", client.session)
+	core.Logger.Info().Msgf("Starting RTSP stream for client %s", client.session)
 }
 
-// handleTeardown handles TEARDOWN request
 func (s *RTSPServer) handleTeardown(client *RTSPClient, request *RTSPRequest) {
 	headers := map[string]string{
 		"CSeq":    strconv.Itoa(request.CSeq),
 		"Session": client.session,
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 200, "OK", headers, "")
+	sendRTSPResponse(client.conn, 200, "OK", headers, "")
 
-	fmt.Printf("Tearing down RTSP stream for client %s\n", client.session)
+	core.Logger.Info().Msgf("Tearing down RTSP stream for client %s", client.session)
 }
 
-// handleUnsupportedMethod handles unsupported RTSP methods
 func (s *RTSPServer) handleUnsupportedMethod(client *RTSPClient, request *RTSPRequest) {
 	headers := map[string]string{
 		"CSeq": strconv.Itoa(request.CSeq),
 	}
 
-	sendRTSPResponseWithHeaders(client.conn, 501, "Not Implemented", headers, "")
+	sendRTSPResponse(client.conn, 501, "Not Implemented", headers, "")
 }
 
 func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) string {
@@ -556,7 +509,7 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 	var skill *tuya.Skill
 	err := json.Unmarshal([]byte(camera.Skill), &skill)
 	if err != nil {
-		fmt.Printf("Error unmarshalling skill: %v\n", err)
+		core.Logger.Error().Err(err).Msg("Error unmarshalling skill")
 		return ""
 	}
 
@@ -565,7 +518,7 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 
 	// Video media description based on skill
 	if skill != nil && len(skill.Videos) > 0 {
-		// Verwende HD stream (streamType 2) als default
+		// HD (main) as default
 		streamType := tuya.GetStreamType(skill, "hd")
 		isHEVC := tuya.IsHEVC(skill, streamType)
 
@@ -633,8 +586,6 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 	audioSdp += "a=recvonly\r\n"
 
 	finalSdp := sdp + videoSdp + audioSdp + backchannelAudio
-
-	fmt.Printf("Generated SDP:\n%s\n", finalSdp)
 
 	return finalSdp
 }

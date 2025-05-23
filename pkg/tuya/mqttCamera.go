@@ -2,9 +2,11 @@ package tuya
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/utils"
 )
 
@@ -146,9 +148,9 @@ func (c *MQTTCameraClient) onMqttCandidate(msg *MqttMessage) {
 		return
 	}
 
-	// candidate from device start with "a=", end with "\r\n", which are not needed by Chrome webRTC
+	// candidate from device start with "a=", end with "\r", which are not needed by Chrome webRTC
 	candidateFrame.Candidate = strings.TrimPrefix(candidateFrame.Candidate, "a=")
-	candidateFrame.Candidate = strings.TrimSuffix(candidateFrame.Candidate, "\r\n")
+	candidateFrame.Candidate = strings.TrimSuffix(candidateFrame.Candidate, "\r")
 
 	c.onCandidate(candidateFrame)
 }
@@ -183,7 +185,7 @@ func (c *MQTTCameraClient) onError(err error) {
 
 func (c *MQTTCameraClient) sendMqttMessage(messageType string, protocol int, transactionID string, data interface{}) error {
 	if c.mqttClient.closed {
-		return fmt.Errorf("mqtt client is closed, send mqtt message fail")
+		return errors.New("mqtt client is closed, send mqtt message fail")
 	}
 
 	jsonMessage, err := json.Marshal(data)
@@ -217,7 +219,7 @@ func (c *MQTTCameraClient) sendMqttMessage(messageType string, protocol int, tra
 
 	token := c.mqttClient.mqtt.Publish(c.publishTopic, 1, false, payload)
 	if token.Wait() && token.Error() != nil {
-		fmt.Printf("Send mqtt message error: %s\n", token.Error())
+		core.Logger.Error().Err(token.Error()).Msgf("Send mqtt message error")
 		return token.Error()
 	}
 

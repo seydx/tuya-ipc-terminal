@@ -10,16 +10,14 @@ import (
 	"tuya-ipc-terminal/pkg/tuya"
 )
 
-// UserSession represents a stored user authentication session
 type UserSession struct {
 	Region      string            `json:"region"`
 	Email       string            `json:"email"`
 	SessionData *tuya.SessionData `json:"sessionData"`
 	LastRefresh time.Time         `json:"lastRefresh"`
-	UserKey     string            `json:"userKey"` // region_email for easy lookup
+	UserKey     string            `json:"userKey"`
 }
 
-// CameraInfo represents camera information for RTSP endpoints
 type CameraInfo struct {
 	UserKey    string `json:"userKey"` // region_email
 	DeviceID   string `json:"deviceId"`
@@ -31,18 +29,15 @@ type CameraInfo struct {
 	Skill      string `json:"skill"`
 }
 
-// CameraRegistry stores all discovered cameras
 type CameraRegistry struct {
 	Cameras     []CameraInfo `json:"cameras"`
 	LastUpdated time.Time    `json:"lastUpdated"`
 }
 
-// StorageManager handles persistent storage of sessions and camera info
 type StorageManager struct {
 	dataDir string
 }
 
-// NewStorageManager creates a new storage manager
 func NewStorageManager() (*StorageManager, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -59,29 +54,24 @@ func NewStorageManager() (*StorageManager, error) {
 	}, nil
 }
 
-// GetDataDir returns the data directory path
 func (sm *StorageManager) GetDataDir() string {
 	return sm.dataDir
 }
 
-// userKey creates a unique key for a user
 func userKey(region, email string) string {
 	safeEmail := strings.ReplaceAll(strings.ReplaceAll(email, "@", "_at_"), ".", "_")
 	return fmt.Sprintf("%s_%s", region, safeEmail)
 }
 
-// getUserFilePath returns the file path for a user session
 func (sm *StorageManager) getUserFilePath(region, email string) string {
 	key := userKey(region, email)
 	return filepath.Join(sm.dataDir, fmt.Sprintf("user_%s.json", key))
 }
 
-// getCameraRegistryPath returns the path for camera registry
 func (sm *StorageManager) getCameraRegistryPath() string {
 	return filepath.Join(sm.dataDir, "cameras.json")
 }
 
-// ListUsers returns all stored user sessions
 func (sm *StorageManager) ListUsers() ([]UserSession, error) {
 	pattern := filepath.Join(sm.dataDir, "user_*.json")
 	files, err := filepath.Glob(pattern)
@@ -107,7 +97,6 @@ func (sm *StorageManager) ListUsers() ([]UserSession, error) {
 	return users, nil
 }
 
-// GetUser retrieves a specific user session
 func (sm *StorageManager) GetUser(region, email string) (*UserSession, error) {
 	filePath := sm.getUserFilePath(region, email)
 
@@ -127,7 +116,6 @@ func (sm *StorageManager) GetUser(region, email string) (*UserSession, error) {
 	return &user, nil
 }
 
-// SaveUser stores a user session
 func (sm *StorageManager) SaveUser(region, email string, sessionData *tuya.SessionData) error {
 	user := UserSession{
 		Region:      region,
@@ -146,7 +134,6 @@ func (sm *StorageManager) SaveUser(region, email string, sessionData *tuya.Sessi
 	return os.WriteFile(filePath, data, 0600)
 }
 
-// RemoveUser deletes a user session
 func (sm *StorageManager) RemoveUser(region, email string) error {
 	filePath := sm.getUserFilePath(region, email)
 
@@ -156,11 +143,9 @@ func (sm *StorageManager) RemoveUser(region, email string) error {
 		}
 	}
 
-	// Also remove user's cameras from registry
 	return sm.removeCamerasForUser(userKey(region, email))
 }
 
-// GetCameraRegistry loads the camera registry
 func (sm *StorageManager) GetCameraRegistry() (*CameraRegistry, error) {
 	filePath := sm.getCameraRegistryPath()
 
@@ -183,7 +168,6 @@ func (sm *StorageManager) GetCameraRegistry() (*CameraRegistry, error) {
 	return &registry, nil
 }
 
-// SaveCameraRegistry stores the camera registry
 func (sm *StorageManager) SaveCameraRegistry(registry *CameraRegistry) error {
 	registry.LastUpdated = time.Now()
 
@@ -196,7 +180,6 @@ func (sm *StorageManager) SaveCameraRegistry(registry *CameraRegistry) error {
 	return os.WriteFile(filePath, data, 0600)
 }
 
-// UpdateCamerasForUser updates cameras for a specific user
 func (sm *StorageManager) UpdateCamerasForUser(userKey string, cameras []CameraInfo) error {
 	registry, err := sm.GetCameraRegistry()
 	if err != nil {
@@ -218,7 +201,6 @@ func (sm *StorageManager) UpdateCamerasForUser(userKey string, cameras []CameraI
 	return sm.SaveCameraRegistry(registry)
 }
 
-// removeCamerasForUser removes all cameras for a specific user
 func (sm *StorageManager) removeCamerasForUser(userKey string) error {
 	registry, err := sm.GetCameraRegistry()
 	if err != nil {
@@ -236,7 +218,6 @@ func (sm *StorageManager) removeCamerasForUser(userKey string) error {
 	return sm.SaveCameraRegistry(registry)
 }
 
-// GetCamerasForUser returns cameras for a specific user
 func (sm *StorageManager) GetCamerasForUser(userKey string) ([]CameraInfo, error) {
 	registry, err := sm.GetCameraRegistry()
 	if err != nil {
@@ -253,7 +234,6 @@ func (sm *StorageManager) GetCamerasForUser(userKey string) ([]CameraInfo, error
 	return userCameras, nil
 }
 
-// GetAllCameras returns all cameras from all users
 func (sm *StorageManager) GetAllCameras() ([]CameraInfo, error) {
 	registry, err := sm.GetCameraRegistry()
 	if err != nil {
@@ -263,7 +243,6 @@ func (sm *StorageManager) GetAllCameras() ([]CameraInfo, error) {
 	return registry.Cameras, nil
 }
 
-// GenerateRTSPPath generates a unique RTSP path for a camera
 func (sm *StorageManager) GenerateRTSPPath(deviceName, deviceID string) string {
 	// Clean device name for URL safety
 	safeName := strings.ReplaceAll(deviceName, " ", "_")
@@ -278,7 +257,6 @@ func (sm *StorageManager) GenerateRTSPPath(deviceName, deviceID string) string {
 	return fmt.Sprintf("/%s", safeName)
 }
 
-// ValidateUserSession checks if a user session is still valid
 func (sm *StorageManager) ValidateUserSession(region, email string) (bool, error) {
 	user, err := sm.GetUser(region, email)
 	if err != nil {
@@ -289,8 +267,9 @@ func (sm *StorageManager) ValidateUserSession(region, email string) (bool, error
 		return false, nil
 	}
 
-	// Check if session is older than 7 days (you can adjust this)
-	if time.Since(user.LastRefresh) > 7*24*time.Hour {
+	// Check if session is older than 4 days
+	// It seems the cookie expires after 4 days
+	if time.Since(user.LastRefresh) > 4*24*time.Hour {
 		return false, nil
 	}
 

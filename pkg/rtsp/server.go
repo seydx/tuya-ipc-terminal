@@ -1,18 +1,20 @@
 package rtsp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/storage"
 	"tuya-ipc-terminal/pkg/tuya"
 )
 
-// RTSPServer represents the RTSP server
 type RTSPServer struct {
 	port           int
 	listener       net.Listener
@@ -25,36 +27,37 @@ type RTSPServer struct {
 	running        bool
 }
 
-// RTSPClient represents a connected RTSP client
 type RTSPClient struct {
-	conn                    net.Conn
-	session                 string
-	cameraPath              string
-	stream                  *CameraStream
-	transportMode           TransportMode
-	videoPort               int
-	audioPort               int
-	backchannelAudioPort    int
-	videoChannel            byte
-	audioChannel            byte
-	backchannelAudioChannel byte
-	setupCount              int
+	conn             net.Conn
+	session          string
+	cameraPath       string
+	stream           *CameraStream
+	reader           *bufio.Reader
+	transportMode    TransportMode
+	videoPort        int
+	audioPort        int
+	backAudioPort    int
+	videoChannel     byte
+	audioChannel     byte
+	backAudioChannel byte
+	setupCount       int
 }
 
-// CameraStream represents an active camera stream
 type CameraStream struct {
 	camera       *storage.CameraInfo
 	resolution   string
 	user         *storage.UserSession
 	webrtcBridge *WebRTCBridge
-	// rtpForwarder *RTPForwarder
 	clients      map[string]*RTSPClient
 	mutex        sync.RWMutex
 	active       bool
 	lastActivity time.Time
+
+	// Delayed shutdown
+	shutdownTimer *time.Timer
+	shutdownDelay time.Duration
 }
 
-// ServerConfig holds server configuration
 type ServerConfig struct {
 	Port                 int
 	MaxClients           int
@@ -63,7 +66,6 @@ type ServerConfig struct {
 	EnableAuthentication bool
 }
 
-// NewRTSPServer creates a new RTSP server instance
 func NewRTSPServer(port int, storageManager *storage.StorageManager) *RTSPServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -78,13 +80,12 @@ func NewRTSPServer(port int, storageManager *storage.StorageManager) *RTSPServer
 	}
 }
 
-// Start starts the RTSP server
 func (s *RTSPServer) Start() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if s.running {
-		return fmt.Errorf("server is already running")
+		return errors.New("server is already running")
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
@@ -95,12 +96,12 @@ func (s *RTSPServer) Start() error {
 	s.listener = listener
 	s.running = true
 
-	fmt.Printf("RTSP Server started on port %d\n", s.port)
-	fmt.Printf("Available endpoints:\n")
+	core.Logger.Info().Msgf("RTSP Server started on port %d", s.port)
+	core.Logger.Info().Msgf("Available endpoints:")
 
 	// List available camera endpoints
 	if err := s.printAvailableEndpoints(); err != nil {
-		fmt.Printf("Warning: Could not list camera endpoints: %v\n", err)
+		core.Logger.Warn().Msgf("Could not list camera endpoints: %v", err)
 	}
 
 	// Start accepting connections
@@ -112,16 +113,15 @@ func (s *RTSPServer) Start() error {
 	return nil
 }
 
-// Stop stops the RTSP server
 func (s *RTSPServer) Stop() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	if !s.running {
-		return fmt.Errorf("server is not running")
+		return errors.New("server is not running")
 	}
 
-	fmt.Println("Stopping RTSP server...")
+	core.Logger.Info().Msg("Stopping RTSP server...")
 
 	// Cancel context to stop all goroutines
 	s.cancel()
@@ -142,24 +142,21 @@ func (s *RTSPServer) Stop() error {
 	}
 
 	s.running = false
-	fmt.Println("RTSP server stopped")
+	core.Logger.Info().Msg("RTSP server stopped")
 
 	return nil
 }
 
-// IsRunning returns whether the server is running
 func (s *RTSPServer) IsRunning() bool {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 	return s.running
 }
 
-// GetPort returns the server port
 func (s *RTSPServer) GetPort() int {
 	return s.port
 }
 
-// GetStats returns server statistics
 func (s *RTSPServer) GetStats() ServerStats {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
@@ -180,7 +177,6 @@ func (s *RTSPServer) GetStats() ServerStats {
 	}
 }
 
-// ServerStats holds server statistics
 type ServerStats struct {
 	Port         int  `json:"port"`
 	Running      bool `json:"running"`
@@ -189,7 +185,6 @@ type ServerStats struct {
 	TotalStreams int  `json:"totalStreams"`
 }
 
-// acceptConnections accepts incoming RTSP connections
 func (s *RTSPServer) acceptConnections() {
 	for {
 		select {
@@ -199,7 +194,7 @@ func (s *RTSPServer) acceptConnections() {
 			conn, err := s.listener.Accept()
 			if err != nil {
 				if s.running {
-					fmt.Printf("Error accepting connection: %v\n", err)
+					core.Logger.Error().Err(err).Msg("Error accepting connection")
 				}
 				continue
 			}
@@ -210,65 +205,78 @@ func (s *RTSPServer) acceptConnections() {
 	}
 }
 
-// handleConnection handles a single RTSP connection
 func (s *RTSPServer) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// Parse RTSP request
-	request, err := parseRTSPRequest(conn)
+	reader := bufio.NewReader(conn)
+
+	// Parse initial RTSP request
+	request, err := s.parseRTSPRequestFromReader(reader)
 	if err != nil {
-		fmt.Printf("Error parsing RTSP request: %v\n", err)
+		core.Logger.Error().Err(err).Msg("Error parsing initial RTSP request")
 		return
 	}
 
 	// Extract camera path from URL
 	cameraPath, streamResolution := extractCameraPath(request.URL)
 	if cameraPath == "" {
-		sendRTSPResponse(conn, 404, "Not Found", "")
+		core.Logger.Error().Msg("Invalid RTSP URL")
+		sendRTSPResponse(conn, 400, "Bad Request", nil, "")
 		return
 	}
 
 	// Find camera
 	camera, user, err := s.findCamera(cameraPath)
 	if err != nil {
-		fmt.Printf("Camera not found for path %s: %v\n", cameraPath, err)
-		sendRTSPResponse(conn, 404, "Not Found", "Camera not found")
+		core.Logger.Error().Msgf("Error finding camera for path %s: %v", cameraPath, err)
+		sendRTSPResponse(conn, 500, "Internal Server Error", nil, "")
 		return
 	}
 
-	fmt.Printf("New RTSP connection for camera: %s (%s)\n", camera.DeviceName, camera.DeviceID)
+	if camera == nil {
+		core.Logger.Error().Msgf("Camera not found for path %s", cameraPath)
+		sendRTSPResponse(conn, 404, "Not Found", nil, "")
+		return
+	}
+
+	core.Logger.Info().Msgf("New RTSP connection for camera: %s (%s)", camera.DeviceName, camera.DeviceID)
 
 	// Create or get existing stream
 	stream, err := s.getOrCreateStream(camera, streamResolution, user)
 	if err != nil {
-		fmt.Printf("Failed to create stream for camera %s: %v\n", camera.DeviceName, err)
-		sendRTSPResponse(conn, 500, "Internal Server Error", "Failed to create stream")
+		core.Logger.Error().Err(err).Msgf("Failed to create stream for camera %s", camera.DeviceName)
+		sendRTSPResponse(conn, 500, "Internal Server Error", nil, "Failed to create stream")
 		return
 	}
 
 	// Create RTSP client
 	client := &RTSPClient{
-		conn:          conn,
-		session:       generateSessionID(),
-		cameraPath:    cameraPath,
-		stream:        stream,
-		transportMode: TransportUDP, // Default to UDP
-		videoPort:     0,            // Will be set during SETUP
-		audioPort:     0,            // Will be set during SETUP
-		videoChannel:  0,            // For TCP interleaved
-		audioChannel:  1,            // For TCP interleaved
-		setupCount:    0,
+		conn:             conn,
+		reader:           reader,
+		session:          generateSessionID(),
+		cameraPath:       cameraPath,
+		stream:           stream,
+		transportMode:    TransportUDP, // Default to UDP
+		videoPort:        0,
+		audioPort:        0,
+		backAudioPort:    0,
+		videoChannel:     0,
+		audioChannel:     1,
+		backAudioChannel: 2,
+		setupCount:       0,
 	}
 
 	// Add client to server and stream
 	s.addClient(client)
 	stream.AddClient(client)
 
-	// Handle RTSP protocol
-	s.handleRTSPProtocol(client, request)
+	// Handle initial request
+	s.handleRTSPMethod(client, request)
+
+	// Handle further requests
+	s.handleRTSPProtocol(client)
 }
 
-// findCamera finds a camera by RTSP path
 func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.UserSession, error) {
 	cameras, err := s.storageManager.GetAllCameras()
 	if err != nil {
@@ -292,10 +300,9 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 		}
 	}
 
-	return nil, nil, fmt.Errorf("camera not found for path: %s", path)
+	return nil, nil, nil
 }
 
-// getOrCreateStream gets existing stream or creates new one
 func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession) (*CameraStream, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -308,40 +315,34 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 	}
 
 	// Create new stream
-	stream := &CameraStream{
-		camera:       camera,
-		resolution:   streamResolution,
-		user:         user,
-		clients:      make(map[string]*RTSPClient),
-		active:       false,
-		lastActivity: time.Now(),
-	}
-
-	// Create WebRTC bridge
-	stream.webrtcBridge = NewWebRTCBridge(camera, streamResolution, user, s.storageManager)
+	stream := NewCameraStream(camera, streamResolution, user, s.storageManager)
 
 	stream.webrtcBridge.OnError = func(err error) {
+		stream.mutex.Lock()
+		defer stream.mutex.Unlock()
+
 		if stream.active {
-			fmt.Printf("WebRTC error for camera %s: %v\n", camera.DeviceName, err)
-			stream.Stop()
+			core.Logger.Error().Err(err).Msgf("WebRTC error for camera %s", camera.DeviceName)
+			stream.stopStreamInternal()
+
+			s.mutex.Lock()
 			delete(s.streams, streamId)
+			s.mutex.Unlock()
 		}
 	}
 
 	s.streams[streamId] = stream
 
-	fmt.Printf("Created new stream for camera: %s\n", camera.DeviceName)
+	core.Logger.Info().Msgf("Created new stream for camera: %s", camera.DeviceName)
 	return stream, nil
 }
 
-// addClient adds a client to the server
 func (s *RTSPServer) addClient(client *RTSPClient) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.clients[client.session] = client
 }
 
-// removeClient removes a client from the server
 func (s *RTSPServer) removeClient(sessionID string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -357,7 +358,6 @@ func (s *RTSPServer) removeClient(sessionID string) {
 	}
 }
 
-// printAvailableEndpoints prints available camera endpoints
 func (s *RTSPServer) printAvailableEndpoints() error {
 	cameras, err := s.storageManager.GetAllCameras()
 	if err != nil {
@@ -365,7 +365,7 @@ func (s *RTSPServer) printAvailableEndpoints() error {
 	}
 
 	if len(cameras) == 0 {
-		fmt.Println("  No cameras available. Run 'cameras refresh' first.")
+		core.Logger.Warn().Msg("  No cameras available. Run 'cameras refresh' first.")
 		return nil
 	}
 
@@ -377,17 +377,16 @@ func (s *RTSPServer) printAvailableEndpoints() error {
 		baseUrl := fmt.Sprintf("rtsp://localhost:%d%s", s.port, camera.RTSPPath)
 
 		if supportClarity {
-			fmt.Printf("  %s/hd (%s)\n", baseUrl, camera.DeviceName)
-			fmt.Printf("  %s/sd (%s)\n", baseUrl, camera.DeviceName)
+			core.Logger.Info().Msgf("  %s/hd (%s)", baseUrl, camera.DeviceName)
+			core.Logger.Info().Msgf("  %s/sd (%s)", baseUrl, camera.DeviceName)
 		} else {
-			fmt.Printf("  %s (%s)\n", baseUrl, camera.DeviceName)
+			core.Logger.Info().Msgf("  %s (%s)", baseUrl, camera.DeviceName)
 		}
 	}
 
 	return nil
 }
 
-// cleanupRoutine periodically cleans up inactive streams
 func (s *RTSPServer) cleanupRoutine() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -402,7 +401,6 @@ func (s *RTSPServer) cleanupRoutine() {
 	}
 }
 
-// cleanupInactiveStreams removes streams that have been inactive
 func (s *RTSPServer) cleanupInactiveStreams() {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -411,17 +409,39 @@ func (s *RTSPServer) cleanupInactiveStreams() {
 	for deviceID, stream := range s.streams {
 		// Remove streams inactive for more than 5 minutes
 		if now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0 {
-			fmt.Printf("Cleaning up inactive stream for camera: %s\n", stream.camera.DeviceName)
+			core.Logger.Debug().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
 			stream.Stop()
 			delete(s.streams, deviceID)
 		}
 	}
 }
 
-// AddClient adds a client to the stream
+func NewCameraStream(camera *storage.CameraInfo, resolution string, user *storage.UserSession, storageManager *storage.StorageManager) *CameraStream {
+	stream := &CameraStream{
+		camera:        camera,
+		resolution:    resolution,
+		user:          user,
+		clients:       make(map[string]*RTSPClient),
+		active:        false,
+		lastActivity:  time.Now(),
+		shutdownDelay: 5 * time.Second, // 5 second delay before shutdown
+	}
+
+	stream.webrtcBridge = NewWebRTCBridge(camera, resolution, user, storageManager)
+
+	return stream
+}
+
 func (cs *CameraStream) AddClient(client *RTSPClient) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
+
+	// Cancel any pending shutdown
+	if cs.shutdownTimer != nil {
+		cs.shutdownTimer.Stop()
+		cs.shutdownTimer = nil
+		core.Logger.Debug().Msgf("Cancelled pending shutdown for camera %s - new client connected", cs.camera.DeviceName)
+	}
 
 	cs.clients[client.session] = client
 	cs.lastActivity = time.Now()
@@ -432,26 +452,34 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 	}
 }
 
-// RemoveClient removes a client from the stream
 func (cs *CameraStream) RemoveClient(sessionID string) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
 	// Remove from RTP forwarder
-	if cs.webrtcBridge.rtpForwarder != nil {
+	if cs.webrtcBridge != nil && cs.webrtcBridge.rtpForwarder != nil {
 		cs.webrtcBridge.rtpForwarder.RemoveClient(sessionID)
 	}
 
 	delete(cs.clients, sessionID)
 	cs.lastActivity = time.Now()
 
-	// Stop stream if no clients
+	// Schedule stream shutdown if no clients
 	if len(cs.clients) == 0 && cs.active {
-		go cs.stopStream()
+		cs.scheduleShutdown()
 	}
 }
 
-// startStream starts the camera stream
+func (cs *CameraStream) SetShutdownDelay(delay time.Duration) {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	cs.shutdownDelay = delay
+}
+
+func (cs *CameraStream) Stop() {
+	cs.stopStream()
+}
+
 func (cs *CameraStream) startStream() {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
@@ -460,34 +488,60 @@ func (cs *CameraStream) startStream() {
 		return
 	}
 
-	fmt.Printf("Starting stream for camera: %s\n", cs.camera.DeviceName)
+	core.Logger.Info().Msgf("Starting stream for camera: %s", cs.camera.DeviceName)
 
-	// Start WebRTC bridge
 	if err := cs.webrtcBridge.Start(); err != nil {
-		fmt.Printf("Failed to start WebRTC bridge: %v\n", err)
+		core.Logger.Error().Err(err).Msg("Failed to start WebRTC bridge")
 		return
 	}
 
 	cs.active = true
 }
 
-// stopStream stops the camera stream
 func (cs *CameraStream) stopStream() {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
+	cs.stopStreamInternal()
+}
 
+func (cs *CameraStream) stopStreamInternal() {
 	if !cs.active {
 		return
 	}
 
-	fmt.Printf("Stopping stream for camera: %s\n", cs.camera.DeviceName)
+	// Cancel any pending shutdown
+	if cs.shutdownTimer != nil {
+		cs.shutdownTimer.Stop()
+		cs.shutdownTimer = nil
+	}
 
-	// Stop WebRTC bridge
-	cs.webrtcBridge.Stop()
+	core.Logger.Info().Msgf("Stopping stream for camera: %s", cs.camera.DeviceName)
+
+	if cs.webrtcBridge != nil {
+		cs.webrtcBridge.Stop()
+	}
 	cs.active = false
 }
 
-// Stop stops the camera stream
-func (cs *CameraStream) Stop() {
-	cs.stopStream()
+// scheduleShutdown schedules a delayed shutdown
+func (cs *CameraStream) scheduleShutdown() {
+	// Cancel any existing timer
+	if cs.shutdownTimer != nil {
+		cs.shutdownTimer.Stop()
+	}
+
+	core.Logger.Debug().Msgf("Scheduling shutdown for camera %s in %v", cs.camera.DeviceName, cs.shutdownDelay)
+
+	cs.shutdownTimer = time.AfterFunc(cs.shutdownDelay, func() {
+		cs.mutex.Lock()
+		defer cs.mutex.Unlock()
+
+		// Double-check no clients connected during the delay
+		if len(cs.clients) == 0 && cs.active {
+			core.Logger.Info().Msgf("Executing delayed shutdown for camera %s", cs.camera.DeviceName)
+			cs.stopStreamInternal()
+		}
+
+		cs.shutdownTimer = nil
+	})
 }

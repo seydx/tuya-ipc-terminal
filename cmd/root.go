@@ -43,7 +43,8 @@ Examples:
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
-func Execute() error {
+func Execute(version string) error {
+	rootCmd.Version = version
 	return rootCmd.Execute()
 }
 
@@ -60,7 +61,7 @@ func initConfig() {
 	var err error
 	storageManager, err = storage.NewStorageManager()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize storage: %v\n", err)
+		fmt.Println("Failed to initialize storage")
 		os.Exit(1)
 	}
 
