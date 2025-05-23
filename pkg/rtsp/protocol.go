@@ -68,7 +68,7 @@ func sendRTSPResponse(conn net.Conn, statusCode int, status string, headers map[
 	responseStr := response.String()
 
 	fmt.Println()
-	core.Logger.Debug().Msgf("Sending RTSP response:")
+	core.Logger.Trace().Msgf("Sending RTSP response:")
 	re := regexp.MustCompile(`\r\n|\r|\n`)
 	lines := re.Split(responseStr, -1)
 	for _, line := range lines {
@@ -240,7 +240,7 @@ func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequ
 	}
 
 	fmt.Println()
-	core.Logger.Debug().Msg("Received RTSP request:")
+	core.Logger.Trace().Msg("Received RTSP request:")
 	fmt.Printf("%s %s %s\n", request.Method, request.URL, request.Version)
 	for key, value := range request.Headers {
 		fmt.Printf("%s: %s\n", key, value)
@@ -300,7 +300,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 	isVideoTrack := strings.Contains(request.URL, "/video")
 	isAudioTrack := strings.Contains(request.URL, "/audio")
 
-	core.Logger.Debug().Msgf("Setup track - Video: %v, Audio: %v, Backchannel: %v", isVideoTrack, isAudioTrack, isBackchannel)
+	core.Logger.Trace().Msgf("Setup track - Video: %v, Audio: %v, Backchannel: %v", isVideoTrack, isAudioTrack, isBackchannel)
 
 	var responseTransport string
 
@@ -344,13 +344,13 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 
 		if isVideoTrack {
 			client.videoChannel = rtpChannel
-			core.Logger.Debug().Msgf("Setup video track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
+			core.Logger.Trace().Msgf("Setup video track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		} else if isAudioTrack {
 			client.audioChannel = rtpChannel
-			core.Logger.Debug().Msgf("Setup audio track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
+			core.Logger.Trace().Msgf("Setup audio track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		} else if isBackchannel {
 			client.backAudioChannel = rtpChannel
-			core.Logger.Debug().Msgf("Setup backchannel track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
+			core.Logger.Trace().Msgf("Setup backchannel track - RTP channel: %d, RTCP channel: %d", rtpChannel, rtcpChannel)
 		}
 
 		responseTransport = fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d",
@@ -425,7 +425,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 				clientRTPPort, clientRTCPPort)
 		}
 
-		core.Logger.Debug().Msgf("UDP setup - Track type: video=%v audio=%v backchannel=%v, Client port: %d, Server port: %d",
+		core.Logger.Trace().Msgf("UDP setup - Track type: video=%v audio=%v backchannel=%v, Client port: %d, Server port: %d",
 			isVideoTrack, isAudioTrack, isBackchannel, clientRTPPort, serverRTPPort)
 
 		// Add/update UDP client with current ports
@@ -447,7 +447,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 	// Increment setup count
 	client.setupCount++
 
-	core.Logger.Debug().Msgf("Client %s setup count: %d", client.session, client.setupCount)
+	core.Logger.Trace().Msgf("Client %s setup count: %d", client.session, client.setupCount)
 
 	headers := map[string]string{
 		"CSeq":      strconv.Itoa(request.CSeq),

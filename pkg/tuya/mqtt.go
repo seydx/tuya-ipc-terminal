@@ -98,15 +98,15 @@ func (c *MQTTClient) RemoveCameraClient(sessionId string) {
 }
 
 func (c *MQTTClient) onConnect(client mqtt.Client) {
-	core.Logger.Debug().Msgf("Connected to mqtt broker")
-	core.Logger.Debug().Msgf("Subscribing to topic: %s", c.subscribeTopic)
+	core.Logger.Trace().Msgf("Connected to mqtt broker")
+	core.Logger.Trace().Msgf("Subscribing to topic: %s", c.subscribeTopic)
 
 	if token := client.Subscribe(c.subscribeTopic, 1, c.consume); token.Wait() && token.Error() != nil {
 		c.Connected.Done(token.Error())
 		return
 	}
 
-	core.Logger.Debug().Msgf("Subscribed")
+	core.Logger.Trace().Msgf("Subscribed")
 	c.Connected.Done(nil)
 }
 

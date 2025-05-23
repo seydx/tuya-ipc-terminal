@@ -1,13 +1,16 @@
 package rtsp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +45,10 @@ type WebRTCBridge struct {
 	connected bool
 	waiter    utils.Waiter
 	mutex     sync.RWMutex
+	
+	// Context for cancellation
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// RTP forwarding
 	videoTrack  *pion.TrackRemote
@@ -55,7 +62,9 @@ type WebRTCBridge struct {
 }
 
 func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession, storageManager *storage.StorageManager) *WebRTCBridge {
-	wb := WebRTCBridge{
+	ctx, cancel := context.WithCancel(context.Background())
+	
+	wb := &WebRTCBridge{
 		camera:         camera,
 		resolution:     streamResolution,
 		user:           user,
@@ -63,11 +72,13 @@ func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *
 		storageManager: storageManager,
 		connected:      false,
 		waiter:         utils.Waiter{},
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	wb.rtpForwarder.OnBackchannelAudio = wb.ForwardBackchannelAudioPacket
 
-	return &wb
+	return wb
 }
 
 func (wb *WebRTCBridge) Start() error {
@@ -163,6 +174,9 @@ func (wb *WebRTCBridge) Stop() {
 	}
 
 	core.Logger.Info().Msgf("Stopping WebRTC bridge for camera: %s", wb.camera.DeviceName)
+
+	// Cancel context to stop all goroutines
+	wb.cancel()
 
 	// Send disconnect
 	if wb.cameraClient != nil {
@@ -302,7 +316,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 	// Setup track handler for incoming media if not HEVC
 	wb.peerConnection.OnTrack(func(track *pion.TrackRemote, receiver *pion.RTPReceiver) {
 		codec := track.Codec()
-		core.Logger.Debug().Msgf("Received track: %s, PayloadType: %d", codec.MimeType, codec.PayloadType)
+		core.Logger.Trace().Msgf("Received track: %s, PayloadType: %d", codec.MimeType, codec.PayloadType)
 
 		if track.Kind() == pion.RTPCodecTypeVideo {
 			wb.videoTrack = track
@@ -322,7 +336,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 						)
 						tr.Sender().ReplaceTrack(localTrack)
 						wb.backchannel = localTrack
-						core.Logger.Debug().Msgf("Setup backchannel track")
+						core.Logger.Trace().Msgf("Setup backchannel track")
 						break
 					}
 				}
@@ -352,8 +366,8 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 
 	// Setup handlers
 	wb.cameraClient.HandleAnswer = func(answer tuya.AnswerFrame) {
-		core.Logger.Debug().Msgf("Received WebRTC answer")
-		core.Logger.Debug().Msgf("Answer SDP: %s", answer.Sdp)
+		core.Logger.Trace().Msgf("Received WebRTC answer")
+		core.Logger.Trace().Msgf("Answer SDP: %s", answer.Sdp)
 
 		desc := pion.SessionDescription{
 			Type: pion.SDPTypePranswer,
@@ -372,7 +386,7 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 	}
 
 	wb.cameraClient.HandleCandidate = func(candidate tuya.CandidateFrame) {
-		core.Logger.Trace().Msgf("Received ICE candidate: %s", candidate.Candidate)
+		core.Logger.Trace().Msgf("Received ICE candidate: %s", strings.Split(candidate.Candidate, "\r\n")[0])
 
 		if candidate.Candidate != "" {
 			err := wb.peerConnection.AddICECandidate(pion.ICECandidateInit{Candidate: candidate.Candidate})
@@ -395,7 +409,7 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 func (wb *WebRTCBridge) createAndSendOffer() error {
 	wb.peerConnection.OnICECandidate(func(candidate *pion.ICECandidate) {
 		if candidate != nil {
-			core.Logger.Debug().Msgf("Generated ICE candidate: %s", candidate.ToJSON().Candidate)
+			core.Logger.Trace().Msgf("Generated ICE candidate: %s", candidate.ToJSON().Candidate)
 
 			if err := wb.cameraClient.SendCandidate("a=" + candidate.ToJSON().Candidate); err != nil {
 				core.Logger.Error().Err(err).Msg("Error sending ICE candidate")
@@ -418,7 +432,7 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 	re := regexp.MustCompile(`\r\na=extmap[^\r\n]*`)
 	offer = re.ReplaceAllString(offer, "")
 
-	core.Logger.Debug().Msgf("Sending WebRTC offer")
+	core.Logger.Trace().Msgf("Sending WebRTC offer")
 
 	// Send offer
 	if err := wb.cameraClient.SendOffer(offer, wb.resolution, wb.streamType, wb.isHEVC); err != nil {
@@ -429,30 +443,59 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 }
 
 func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
-	core.Logger.Debug().Msgf("Starting video track handler")
-
+	core.Logger.Trace().Msgf("Starting video track handler")
+	
 	for {
-		packet, _, err := track.ReadRTP()
-		if err != nil {
-			core.Logger.Error().Err(err).Msg("Error reading video RTP packet")
-			continue
-		}
+		select {
+		case <-wb.ctx.Done():
+			return
+		default:
+			packet, _, err := track.ReadRTP()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				// Check if it's a known close error
+				if strings.Contains(err.Error(), "closed") || 
+				   strings.Contains(err.Error(), "EOF") ||
+				   strings.Contains(err.Error(), "use of closed network connection") {
+					return
+				}
+				core.Logger.Warn().Err(err).Msg("Unexpected error reading video RTP packet")
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 
-		wb.rtpForwarder.ForwardVideoPacket(packet)
+			wb.rtpForwarder.ForwardVideoPacket(packet)
+		}
 	}
 }
 
 func (wb *WebRTCBridge) handleAudioTrack(track *pion.TrackRemote) {
-	core.Logger.Debug().Msgf("Starting audio track handler")
-
+	core.Logger.Trace().Msgf("Starting audio track handler")
+	
 	for {
-		packet, _, err := track.ReadRTP()
-		if err != nil {
-			core.Logger.Error().Err(err).Msg("Error reading audio RTP packet")
-			continue
-		}
+		select {
+		case <-wb.ctx.Done():
+			return
+		default:
+			packet, _, err := track.ReadRTP()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				if strings.Contains(err.Error(), "closed") || 
+				   strings.Contains(err.Error(), "EOF") ||
+				   strings.Contains(err.Error(), "use of closed network connection") {
+					return
+				}
+				core.Logger.Warn().Err(err).Msg("Unexpected error reading audio RTP packet")
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 
-		wb.rtpForwarder.ForwardAudioPacket(packet)
+			wb.rtpForwarder.ForwardAudioPacket(packet)
+		}
 	}
 }
 

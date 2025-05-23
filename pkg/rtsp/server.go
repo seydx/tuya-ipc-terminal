@@ -409,7 +409,7 @@ func (s *RTSPServer) cleanupInactiveStreams() {
 	for deviceID, stream := range s.streams {
 		// Remove streams inactive for more than 5 minutes
 		if now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0 {
-			core.Logger.Debug().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
+			core.Logger.Trace().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
 			stream.Stop()
 			delete(s.streams, deviceID)
 		}
@@ -440,7 +440,7 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 	if cs.shutdownTimer != nil {
 		cs.shutdownTimer.Stop()
 		cs.shutdownTimer = nil
-		core.Logger.Debug().Msgf("Cancelled pending shutdown for camera %s - new client connected", cs.camera.DeviceName)
+		core.Logger.Trace().Msgf("Cancelled pending shutdown for camera %s - new client connected", cs.camera.DeviceName)
 	}
 
 	cs.clients[client.session] = client
@@ -530,7 +530,7 @@ func (cs *CameraStream) scheduleShutdown() {
 		cs.shutdownTimer.Stop()
 	}
 
-	core.Logger.Debug().Msgf("Scheduling shutdown for camera %s in %v", cs.camera.DeviceName, cs.shutdownDelay)
+	core.Logger.Trace().Msgf("Scheduling shutdown for camera %s in %v", cs.camera.DeviceName, cs.shutdownDelay)
 
 	cs.shutdownTimer = time.AfterFunc(cs.shutdownDelay, func() {
 		cs.mutex.Lock()

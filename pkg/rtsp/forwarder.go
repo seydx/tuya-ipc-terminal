@@ -158,7 +158,7 @@ func (rf *RTPForwarder) AddUDPClient(sessionID string, videoPort, audioPort int)
 
 	rf.clients[sessionID] = client
 
-	core.Logger.Debug().Msgf("Added UDP RTP client %s (video port:%d, audio port:%d)",
+	core.Logger.Trace().Msgf("Added UDP RTP client %s (video port:%d, audio port:%d)",
 		sessionID, videoPort, audioPort)
 	return nil
 }
@@ -200,7 +200,7 @@ func (rf *RTPForwarder) SetupUDPBackchannel(sessionID string, clientPort int) (i
 	go rf.handleUDPBackchannelRTP(sessionID, client.backchannelListener)
 	go rf.handleUDPBackchannelRTCP(client.backchannelRTCPListener)
 
-	core.Logger.Debug().Msgf("Setup UDP backchannel for client %s (client ports:%d-%d, server ports:%d-%d)",
+	core.Logger.Trace().Msgf("Setup UDP backchannel for client %s (client ports:%d-%d, server ports:%d-%d)",
 		sessionID, clientPort, clientPort+1, portPair.RTPPort, portPair.RTCPPort)
 
 	return portPair.RTPPort, nil
@@ -255,7 +255,7 @@ func (rf *RTPForwarder) AddTCPClient(sessionID string, conn net.Conn, videoChann
 
 	// Check if client already exists, update it
 	if existingClient, exists := rf.clients[sessionID]; exists {
-		core.Logger.Debug().Msgf("TCP client %s already exists, updating channels (video:%d->%d, audio:%d->%d, back:%d->%d)",
+		core.Logger.Trace().Msgf("TCP client %s already exists, updating channels (video:%d->%d, audio:%d->%d, back:%d->%d)",
 			sessionID, existingClient.videoChannel, videoChannel, existingClient.audioChannel, audioChannel, existingClient.backAudioChannel, backAudioChannel)
 		existingClient.videoChannel = videoChannel
 		existingClient.audioChannel = audioChannel
@@ -276,7 +276,7 @@ func (rf *RTPForwarder) AddTCPClient(sessionID string, conn net.Conn, videoChann
 
 	rf.clients[sessionID] = client
 
-	core.Logger.Debug().Msgf("Added TCP RTP client %s (video channel:%d, audio channel:%d, back audio channel:%d)",
+	core.Logger.Trace().Msgf("Added TCP RTP client %s (video channel:%d, audio channel:%d, back audio channel:%d)",
 		sessionID, videoChannel, audioChannel, backAudioChannel)
 	return nil
 }
@@ -302,7 +302,7 @@ func (rf *RTPForwarder) RemoveClient(sessionID string) {
 		}
 
 		delete(rf.clients, sessionID)
-		core.Logger.Debug().Msgf("Removed RTP client %s", sessionID)
+		core.Logger.Trace().Msgf("Removed RTP client %s", sessionID)
 	}
 }
 
@@ -337,7 +337,7 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to UDP client %s", sessionID)
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
-					core.Logger.Debug().Msgf("Successfully sent first video packet to UDP client %s on port %d",
+					core.Logger.Trace().Msgf("Successfully sent first video packet to UDP client %s on port %d",
 						sessionID, client.videoPort)
 				}
 			}
@@ -347,7 +347,7 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to TCP client %s", sessionID)
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
-					core.Logger.Debug().Msgf("Successfully sent first video packet to TCP client %s on channel %d",
+					core.Logger.Trace().Msgf("Successfully sent first video packet to TCP client %s on channel %d",
 						sessionID, client.videoChannel)
 				}
 			}
@@ -386,7 +386,7 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to UDP client %s", sessionID)
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
-					core.Logger.Debug().Msgf("Successfully sent first audio packet to UDP client %s on port %d",
+					core.Logger.Trace().Msgf("Successfully sent first audio packet to UDP client %s on port %d",
 						sessionID, client.audioPort)
 				}
 			}
@@ -396,7 +396,7 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to TCP client %s", sessionID)
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
-					core.Logger.Debug().Msgf("Successfully sent first audio packet to TCP client %s on channel %d",
+					core.Logger.Trace().Msgf("Successfully sent first audio packet to TCP client %s on channel %d",
 						sessionID, client.audioChannel)
 				}
 			}
@@ -428,7 +428,7 @@ func (rf *RTPForwarder) Stop() {
 	}
 
 	rf.clients = make(map[string]*RTPClient)
-	core.Logger.Debug().Msg("Stopped RTP forwarder and closed all connections")
+	core.Logger.Trace().Msg("Stopped RTP forwarder and closed all connections")
 }
 
 func (rf *RTPForwarder) GetClientCount() int {
@@ -467,7 +467,7 @@ func (rf *RTPForwarder) CleanupInactiveClients(timeout time.Duration) {
 				}
 			}
 			delete(rf.clients, sessionID)
-			core.Logger.Debug().Msgf("Cleaned up inactive RTP client %s", sessionID)
+			core.Logger.Trace().Msgf("Cleaned up inactive RTP client %s", sessionID)
 		}
 	}
 }
