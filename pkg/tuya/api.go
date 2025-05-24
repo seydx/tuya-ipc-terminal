@@ -291,7 +291,7 @@ func GenerateQRCode(client *http.Client, serverHost string) (string, error) {
 	}
 
 	if !qrResponse.Success {
-		return "", fmt.Errorf("failed to get QR code: %s", qrResponse.Msg)
+		return "", errors.New(qrResponse.Msg)
 	}
 
 	return qrResponse.Result, nil
@@ -402,7 +402,7 @@ func GetAppInfo(client *http.Client, serverHost string) (*AppInfoResponse, error
 	}
 
 	if !appInfoResponse.Success {
-		return nil, fmt.Errorf("failed to get app info: %s", appInfoResponse.Msg)
+		return nil, errors.New(appInfoResponse.Msg)
 	}
 
 	return &appInfoResponse, nil
@@ -443,7 +443,7 @@ func GetMQTTConfig(client *http.Client, serverHost string) (*MQTTConfigResponse,
 	}
 
 	if !mqttConfigResponse.Success {
-		return nil, fmt.Errorf("failed to get MQTT config: %s", mqttConfigResponse.Msg)
+		return nil, errors.New(mqttConfigResponse.Msg)
 	}
 
 	return &mqttConfigResponse, nil
@@ -494,7 +494,7 @@ func GetWebRTCConfig(client *http.Client, serverHost string, deviceId string) (*
 	}
 
 	if !webRTCConfigResponse.Success {
-		return nil, fmt.Errorf("failed to get WebRTC config: %s", webRTCConfigResponse.Msg)
+		return nil,errors.New(webRTCConfigResponse.Msg)
 	}
 
 	return &webRTCConfigResponse, nil
@@ -535,7 +535,7 @@ func GetHomeList(client *http.Client, serverHost string) (*HomeListResponse, err
 	}
 
 	if !homeListResponse.Success {
-		return nil, fmt.Errorf("failed to get home list: %s", homeListResponse.Msg)
+		return nil, errors.New(homeListResponse.Msg)
 	}
 
 	return &homeListResponse, nil
@@ -576,7 +576,7 @@ func GetSharedHomeList(client *http.Client, serverHost string) (*SharedHomeListR
 	}
 
 	if !sharedHomeListResponse.Success {
-		return nil, fmt.Errorf("failed to get shared home list: %s", sharedHomeListResponse.Msg)
+		return nil, errors.New(sharedHomeListResponse.Msg)
 	}
 
 	return &sharedHomeListResponse, nil
@@ -626,7 +626,7 @@ func GetRoomList(client *http.Client, serverHost string, homeId string) (*RoomLi
 	}
 
 	if !roomListResponse.Success {
-		return nil, fmt.Errorf("failed to get room list: %s", roomListResponse.Msg)
+		return nil, errors.New(roomListResponse.Msg)
 	}
 
 	return &roomListResponse, nil

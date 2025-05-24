@@ -331,7 +331,7 @@ func runTestUser(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Testing session for %s (%s)...", email, regionName)
+	fmt.Printf("Testing session for %s (%s)..\n", email, regionName)
 
 	_, err = tuya.GetAppInfo(httpClient, user.SessionData.ServerHost)
 	if err != nil {
