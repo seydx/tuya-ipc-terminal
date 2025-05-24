@@ -494,7 +494,7 @@ func GetWebRTCConfig(client *http.Client, serverHost string, deviceId string) (*
 	}
 
 	if !webRTCConfigResponse.Success {
-		return nil,errors.New(webRTCConfigResponse.Msg)
+		return nil, errors.New(webRTCConfigResponse.Msg)
 	}
 
 	return &webRTCConfigResponse, nil
