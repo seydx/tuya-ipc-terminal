@@ -45,7 +45,7 @@ type WebRTCBridge struct {
 	connected bool
 	waiter    utils.Waiter
 	mutex     sync.RWMutex
-	
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -63,7 +63,7 @@ type WebRTCBridge struct {
 
 func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession, storageManager *storage.StorageManager) *WebRTCBridge {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	wb := &WebRTCBridge{
 		camera:         camera,
 		resolution:     streamResolution,
@@ -173,6 +173,8 @@ func (wb *WebRTCBridge) Stop() {
 		return
 	}
 
+	wb.connected = false
+
 	core.Logger.Info().Msgf("Stopping WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
 	// Cancel context to stop all goroutines
@@ -193,11 +195,11 @@ func (wb *WebRTCBridge) Stop() {
 		wb.mqttClient.Stop()
 	}
 
+	// Stop RTP forwarder
 	if wb.rtpForwarder != nil {
 		wb.rtpForwarder.Stop()
 	}
 
-	wb.connected = false
 	core.Logger.Info().Msgf("WebRTC bridge stopped for camera: %s", wb.camera.DeviceName)
 }
 
@@ -444,7 +446,7 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 
 func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
 	core.Logger.Trace().Msgf("Starting video track handler")
-	
+
 	for {
 		select {
 		case <-wb.ctx.Done():
@@ -456,9 +458,9 @@ func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
 					return
 				}
 				// Check if it's a known close error
-				if strings.Contains(err.Error(), "closed") || 
-				   strings.Contains(err.Error(), "EOF") ||
-				   strings.Contains(err.Error(), "use of closed network connection") {
+				if strings.Contains(err.Error(), "closed") ||
+					strings.Contains(err.Error(), "EOF") ||
+					strings.Contains(err.Error(), "use of closed network connection") {
 					return
 				}
 				core.Logger.Warn().Err(err).Msg("Unexpected error reading video RTP packet")
@@ -473,7 +475,7 @@ func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
 
 func (wb *WebRTCBridge) handleAudioTrack(track *pion.TrackRemote) {
 	core.Logger.Trace().Msgf("Starting audio track handler")
-	
+
 	for {
 		select {
 		case <-wb.ctx.Done():
@@ -484,9 +486,9 @@ func (wb *WebRTCBridge) handleAudioTrack(track *pion.TrackRemote) {
 				if err == io.EOF {
 					return
 				}
-				if strings.Contains(err.Error(), "closed") || 
-				   strings.Contains(err.Error(), "EOF") ||
-				   strings.Contains(err.Error(), "use of closed network connection") {
+				if strings.Contains(err.Error(), "closed") ||
+					strings.Contains(err.Error(), "EOF") ||
+					strings.Contains(err.Error(), "use of closed network connection") {
 					return
 				}
 				core.Logger.Warn().Err(err).Msg("Unexpected error reading audio RTP packet")
