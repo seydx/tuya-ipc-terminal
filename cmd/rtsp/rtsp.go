@@ -18,12 +18,10 @@ import (
 var storageManager *storage.StorageManager
 var rtspServer *rtsp.RTSPServer
 
-// SetStorageManager sets the storage manager instance
 func SetStorageManager(sm *storage.StorageManager) {
 	storageManager = sm
 }
 
-// NewRTSPCmd creates the rtsp command
 func NewRTSPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rtsp",
@@ -39,7 +37,6 @@ func NewRTSPCmd() *cobra.Command {
 	return cmd
 }
 
-// newStartCmd creates the start command
 func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -54,7 +51,6 @@ func newStartCmd() *cobra.Command {
 	return cmd
 }
 
-// newStopCmd creates the stop command
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
@@ -64,7 +60,6 @@ func newStopCmd() *cobra.Command {
 	}
 }
 
-// newStatusCmd creates the status command
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
@@ -74,7 +69,6 @@ func newStatusCmd() *cobra.Command {
 	}
 }
 
-// newListEndpointsCmd creates the list-endpoints command
 func newListEndpointsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list-endpoints",
@@ -88,7 +82,6 @@ func newListEndpointsCmd() *cobra.Command {
 	return cmd
 }
 
-// runStartServer handles the start command
 func runStartServer(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetInt("port")
 	daemon, _ := cmd.Flags().GetBool("daemon")
@@ -150,7 +143,6 @@ func runStartServer(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runStopServer handles the stop command
 func runStopServer(cmd *cobra.Command, args []string) error {
 	if rtspServer == nil {
 		return errors.New("no RTSP server instance found")
@@ -170,7 +162,6 @@ func runStopServer(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runServerStatus handles the status command
 func runServerStatus(cmd *cobra.Command, args []string) error {
 	if rtspServer == nil {
 		fmt.Println("RTSP Server Status: Not initialized")
@@ -195,7 +186,6 @@ func runServerStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runListEndpoints handles the list-endpoints command
 func runListEndpoints(cmd *cobra.Command, args []string) error {
 	cameras, err := storageManager.GetAllCameras()
 	if err != nil {

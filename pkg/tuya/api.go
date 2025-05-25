@@ -2,12 +2,19 @@ package tuya
 
 import (
 	"bytes"
+	"crypto/md5"
+	cryptoRand "crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -24,6 +31,40 @@ type PollResponse struct {
 	T       int64       `json:"t"`
 	Success bool        `json:"success"`
 	Msg     string      `json:"errorMsg,omitempty"`
+}
+
+type LoginTokenRequest struct {
+	CountryCode string `json:"countryCode"`
+	Username    string `json:"username"`
+	IsUid       bool   `json:"isUid"`
+}
+
+type LoginTokenResponse struct {
+	Result struct {
+		Token     string `json:"token"`
+		Exponent  string `json:"exponent"`
+		PublicKey string `json:"publicKey"`
+		PbKey     string `json:"pbKey"`
+	} `json:"result"`
+	Success bool   `json:"success"`
+	Msg     string `json:"errorMsg,omitempty"`
+}
+
+type PasswordLoginRequest struct {
+	CountryCode string `json:"countryCode"`
+	Email       string `json:"email,omitempty"`
+	Mobile      string `json:"mobile,omitempty"`
+	Passwd      string `json:"passwd"`
+	Token       string `json:"token"`
+	IfEncrypt   int    `json:"ifencrypt"`
+	Options     string `json:"options"`
+}
+
+type PasswordLoginResponse struct {
+	Result   LoginResult `json:"result"`
+	Success  bool        `json:"success"`
+	Status   string      `json:"status"`
+	ErrorMsg string      `json:"errorMsg,omitempty"`
 }
 
 type LoginResult struct {
@@ -254,6 +295,95 @@ type RecvMessage struct {
 	Audio struct {
 		SSRC uint32 `json:"ssrc"`
 	} `json:"audio"`
+}
+
+func PasswordLogin(client *http.Client, serverHost, email, password, countryCode string) (*LoginResult, error) {
+	// Step 1: Get login token
+	tokenResp, err := GetLoginToken(client, serverHost, email, countryCode)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Encrypt password with RSA
+	encryptedPassword, err := encryptPassword(password, tokenResp.Result.PbKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt password: %v", err)
+	}
+
+	// Step 3: Perform login
+	var loginResp *PasswordLoginResponse
+	var url string
+
+	loginReq := PasswordLoginRequest{
+		CountryCode: countryCode,
+		Passwd:      encryptedPassword,
+		Token:       tokenResp.Result.Token,
+		IfEncrypt:   1,
+		Options:     `{"group":1}`,
+	}
+
+	if isEmailAddress(email) {
+		url = fmt.Sprintf("https://%s/api/private/email/login", serverHost)
+		loginReq.Email = email
+	} else {
+		url = fmt.Sprintf("https://%s/api/private/phone/login", serverHost)
+		loginReq.Mobile = email
+	}
+
+	loginResp, err = performLogin(client, url, loginReq, serverHost)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !loginResp.Success {
+		return nil, errors.New(loginResp.ErrorMsg)
+	}
+
+	return &loginResp.Result, nil
+}
+
+func GetLoginToken(client *http.Client, serverHost, username, countryCode string) (*LoginTokenResponse, error) {
+	url := fmt.Sprintf("https://%s/api/login/token", serverHost)
+
+	tokenReq := LoginTokenRequest{
+		CountryCode: countryCode,
+		Username:    username,
+		IsUid:       false,
+	}
+
+	jsonData, err := json.Marshal(tokenReq)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", fmt.Sprintf("https://%s", serverHost))
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/login", serverHost))
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var tokenResp LoginTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, err
+	}
+
+	if !tokenResp.Success {
+		return nil, err
+	}
+
+	return &tokenResp, nil
 }
 
 func GenerateQRCode(client *http.Client, serverHost string) (string, error) {
@@ -630,4 +760,72 @@ func GetRoomList(client *http.Client, serverHost string, homeId string) (*RoomLi
 	}
 
 	return &roomListResponse, nil
+}
+
+func performLogin(client *http.Client, url string, loginReq PasswordLoginRequest, serverHost string) (*PasswordLoginResponse, error) {
+	jsonData, err := json.Marshal(loginReq)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Origin", fmt.Sprintf("https://%s", serverHost))
+	req.Header.Set("Referer", fmt.Sprintf("https://%s/login", serverHost))
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var loginResp PasswordLoginResponse
+	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+		return nil, err
+	}
+
+	return &loginResp, nil
+}
+
+func encryptPassword(password, pbKey string) (string, error) {
+	// Hash password with MD5
+	hasher := md5.New()
+	hasher.Write([]byte(password))
+	hashedPassword := hex.EncodeToString(hasher.Sum(nil))
+
+	// Decode PEM public key
+	block, _ := pem.Decode([]byte("-----BEGIN PUBLIC KEY-----\n" + pbKey + "\n-----END PUBLIC KEY-----"))
+	if block == nil {
+		return "", errors.New("failed to decode PEM block")
+	}
+
+	pubKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return "", err
+	}
+
+	rsaPubKey, ok := pubKey.(*rsa.PublicKey)
+	if !ok {
+		return "", errors.New("not an RSA public key")
+	}
+
+	// Encrypt with RSA
+	encrypted, err := rsa.EncryptPKCS1v15(cryptoRand.Reader, rsaPubKey, []byte(hashedPassword))
+	if err != nil {
+		return "", err
+	}
+
+	// Convert to hex string
+	return hex.EncodeToString(encrypted), nil
+}
+
+func isEmailAddress(input string) bool {
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return emailRegex.MatchString(input)
 }

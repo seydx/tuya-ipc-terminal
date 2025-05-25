@@ -1,17 +1,20 @@
 package auth
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mdp/qrterminal"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/publicsuffix"
+	"golang.org/x/term"
 
 	"tuya-ipc-terminal/pkg/storage"
 	"tuya-ipc-terminal/pkg/tuya"
@@ -19,35 +22,15 @@ import (
 
 var storageManager *storage.StorageManager
 
-// Available regions
-var availableRegions = []tuya.Region{
-	{"eu-central", "protect-eu.ismartlife.me", "Central Europe"},
-	{"eu-east", "protect-we.ismartlife.me", "East Europe"},
-	{"us-west", "protect-us.ismartlife.me", "West America"},
-	{"us-east", "protect-ue.ismartlife.me", "East America"},
-	{"china", "protect.ismartlife.me", "China"},
-	{"india", "protect-in.ismartlife.me", "India"},
-}
-
-// SetStorageManager sets the storage manager instance
 func SetStorageManager(sm *storage.StorageManager) {
 	storageManager = sm
 }
 
-// NewAuthCmd creates the auth command
 func NewAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage Tuya user authentication",
-		Long: `Commands to add, remove, list, and manage Tuya Smart account authentication.
-
-Available Regions:
-- eu-central (Central Europe)
-- eu-east (East Europe)
-- us-west (West America)
-- us-east (East America)
-- china (China)
-- india (India)`,
+		Long:  "Commands to add, remove, list, and manage Tuya Smart account authentication",
 	}
 
 	cmd.AddCommand(newListCmd())
@@ -55,11 +38,12 @@ Available Regions:
 	cmd.AddCommand(newRemoveCmd())
 	cmd.AddCommand(newRefreshCmd())
 	cmd.AddCommand(newTestCmd())
+	cmd.AddCommand(newShowRegionsCmd())
+	cmd.AddCommand(newShowCountryCodesCmd())
 
 	return cmd
 }
 
-// newListCmd creates the list command
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -69,29 +53,29 @@ func newListCmd() *cobra.Command {
 	}
 }
 
-// newAddCmd creates the add command
 func newAddCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "add [region] [email]",
 		Short: "Add new user authentication",
 		Long: `Add a new Tuya Smart account authentication.
 
-Available regions:
-  eu-central - Central Europe
-  eu-east    - East Europe  
-  us-west    - West America
-  us-east    - East America
-  china      - China
-  india      - India
+Authentication methods:
+  --qr       Use QR code authentication (default)
+  --password Use email/password authentication
 
 Example:
-  tuya-ipc-terminal auth add eu-central user@example.com`,
+  tuya-ipc-terminal auth add eu-central user@example.com
+  tuya-ipc-terminal auth add --password eu-central user@example.com`,
 		Args: cobra.ExactArgs(2),
 		RunE: runAddUser,
 	}
+
+	cmd.Flags().Bool("qr", false, "Use QR code authentication (default)")
+	cmd.Flags().Bool("password", false, "Use email/password authentication")
+
+	return cmd
 }
 
-// newRemoveCmd creates the remove command
 func newRemoveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove [region] [email]",
@@ -102,18 +86,21 @@ func newRemoveCmd() *cobra.Command {
 	}
 }
 
-// newRefreshCmd creates the refresh command
 func newRefreshCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "refresh [region] [email]",
 		Short: "Refresh user session",
 		Long:  "Refresh an existing user session by re-authenticating.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  runRefreshUser,
 	}
+
+	cmd.Flags().Bool("qr", false, "Use QR code authentication (default)")
+	cmd.Flags().Bool("password", false, "Use email/password authentication")
+
+	return cmd
 }
 
-// newTestCmd creates the test command
 func newTestCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "test [region] [email]",
@@ -124,7 +111,28 @@ func newTestCmd() *cobra.Command {
 	}
 }
 
-// runListUsers handles the list command
+func newShowRegionsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show-regions",
+		Short: "Show all available regions",
+		Long:  "Display all available Tuya Smart regions with their endpoints and descriptions.",
+		RunE:  runShowRegions,
+	}
+}
+
+func newShowCountryCodesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show-country-codes",
+		Short: "Show country codes",
+		Long:  "Display country codes for phone number authentication.",
+		RunE:  runShowCountryCodes,
+	}
+
+	cmd.Flags().StringP("search", "s", "", "Search for countries by name")
+
+	return cmd
+}
+
 func runListUsers(cmd *cobra.Command, args []string) error {
 	users, err := storageManager.ListUsers()
 	if err != nil {
@@ -160,14 +168,20 @@ func runListUsers(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runAddUser handles the add command
 func runAddUser(cmd *cobra.Command, args []string) error {
 	regionName := args[0]
 	email := args[1]
 
-	// Validate region
+	usePassword, _ := cmd.Flags().GetBool("password")
+	useQR, _ := cmd.Flags().GetBool("qr")
+
+	if !usePassword && !useQR {
+		authMethod := promptAuthMethod()
+		usePassword = (authMethod == "password")
+	}
+
 	var selectedRegion *tuya.Region
-	for _, region := range availableRegions {
+	for _, region := range AvailableRegions {
 		if region.Name == regionName {
 			selectedRegion = &region
 			break
@@ -177,19 +191,16 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 	if selectedRegion == nil {
 		fmt.Printf("Invalid region: %s\n", regionName)
 		fmt.Println("Available regions:")
-		for _, region := range availableRegions {
+		for _, region := range AvailableRegions {
 			fmt.Printf("  %s - %s\n", region.Name, region.Description)
 		}
-
 		return fmt.Errorf("invalid region")
 	}
 
-	// Validate email format
 	if !strings.Contains(email, "@") || !strings.Contains(email, ".") {
 		return fmt.Errorf("invalid email format: %s", email)
 	}
 
-	// Check if user already exists
 	existingUser, err := storageManager.GetUser(regionName, email)
 	if err != nil {
 		return fmt.Errorf("failed to check existing user: %v", err)
@@ -206,15 +217,26 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("Adding user %s in region %s (%s)...\n", email, regionName, selectedRegion.Description)
+	authMethodStr := "QR code"
+	if usePassword {
+		authMethodStr = "email/password"
+	}
 
-	// Perform authentication
-	sessionData, err := performAuthentication(*selectedRegion, email)
+	fmt.Println()
+	fmt.Printf("Adding user %s in region %s (%s) using %s authentication...\n",
+		email, regionName, selectedRegion.Description, authMethodStr)
+
+	var sessionData *tuya.SessionData
+	if usePassword {
+		sessionData, err = performPasswordAuthentication(*selectedRegion, email)
+	} else {
+		sessionData, err = performQRAuthentication(*selectedRegion, email)
+	}
+
 	if err != nil {
 		return fmt.Errorf("authentication failed: %v", err)
 	}
 
-	// Save user session
 	if err := storageManager.SaveUser(regionName, email, sessionData); err != nil {
 		return fmt.Errorf("failed to save user session: %v", err)
 	}
@@ -226,12 +248,10 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runRemoveUser handles the remove command
 func runRemoveUser(cmd *cobra.Command, args []string) error {
 	regionName := args[0]
 	email := args[1]
 
-	// Check if user exists
 	existingUser, err := storageManager.GetUser(regionName, email)
 	if err != nil {
 		return fmt.Errorf("failed to check user: %v", err)
@@ -257,14 +277,20 @@ func runRemoveUser(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runRefreshUser handles the refresh command
 func runRefreshUser(cmd *cobra.Command, args []string) error {
 	regionName := args[0]
 	email := args[1]
 
-	// Validate region
+	usePassword, _ := cmd.Flags().GetBool("password")
+	useQR, _ := cmd.Flags().GetBool("qr")
+
+	if !usePassword && !useQR {
+		authMethod := promptAuthMethod()
+		usePassword = (authMethod == "password")
+	}
+
 	var selectedRegion *tuya.Region
-	for _, region := range availableRegions {
+	for _, region := range AvailableRegions {
 		if region.Name == regionName {
 			selectedRegion = &region
 			break
@@ -275,7 +301,6 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid region: %s", regionName)
 	}
 
-	// Check if user exists
 	existingUser, err := storageManager.GetUser(regionName, email)
 	if err != nil {
 		return fmt.Errorf("failed to check user: %v", err)
@@ -285,15 +310,25 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("user %s in region %s not found", email, regionName)
 	}
 
-	fmt.Printf("Refreshing session for user %s in region %s...\n", email, regionName)
+	authMethodStr := "QR code"
+	if usePassword {
+		authMethodStr = "email/password"
+	}
 
-	// Perform authentication
-	sessionData, err := performAuthentication(*selectedRegion, email)
+	fmt.Printf("Refreshing session for user %s in region %s using %s authentication...\n",
+		email, regionName, authMethodStr)
+
+	var sessionData *tuya.SessionData
+	if usePassword {
+		sessionData, err = performPasswordAuthentication(*selectedRegion, email)
+	} else {
+		sessionData, err = performQRAuthentication(*selectedRegion, email)
+	}
+
 	if err != nil {
 		return fmt.Errorf("authentication failed: %v", err)
 	}
 
-	// Save user session
 	if err := storageManager.SaveUser(regionName, email, sessionData); err != nil {
 		return fmt.Errorf("failed to save user session: %v", err)
 	}
@@ -304,7 +339,6 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runTestUser handles the test command
 func runTestUser(cmd *cobra.Command, args []string) error {
 	regionName := args[0]
 	email := args[1]
@@ -324,7 +358,6 @@ func runTestUser(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Test session validity by making an API call
 	httpClient := createHTTPClientWithSession(user.SessionData)
 	if httpClient == nil {
 		fmt.Printf("✗ Failed to create HTTP client for user %s\n", email)
@@ -348,47 +381,211 @@ func runTestUser(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// performAuthentication performs the QR code authentication flow
-func performAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
-	serverHost := region.Host
+func runShowRegions(cmd *cobra.Command, args []string) error {
+	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("%-15s %-35s %s\n", "REGION", "ENDPOINT", "DESCRIPTION")
+	fmt.Println(strings.Repeat("-", 70))
 
-	// Create HTTP client
-	httpClient := createHTTPClientWithSession(nil)
-
-	// Generate QR code
-	fmt.Println("Generating QR code...")
-	qrCodeToken, err := tuya.GenerateQRCode(httpClient, serverHost)
-	if err != nil {
-		return nil, fmt.Errorf("error generating QR code: %v", err)
+	for _, region := range AvailableRegions {
+		fmt.Printf("%-15s %-35s %s\n", region.Name, region.Host, region.Description)
 	}
 
-	// Show QR code
-	qrterminal.Generate("tuyaSmart--qrLogin?token="+qrCodeToken, qrterminal.L, os.Stdout)
-	fmt.Printf("\nPlease scan the QR code with the Tuya Smart / Smart Life app.\n")
-	fmt.Printf("Make sure to use the account with email: %s\n", email)
-	fmt.Println("\nPress Enter after scanning to continue...")
-	fmt.Scanln()
+	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("Total: %d regions available\n", len(AvailableRegions))
+	fmt.Println("\nUsage examples:")
+	fmt.Println("  tuya-ipc-terminal auth add eu-central user@example.com")
+	fmt.Println("  tuya-ipc-terminal auth add --password us-west user@example.com")
 
-	// Poll for login status
-	fmt.Println("Polling for login status...")
-	loginResult, err := tuya.PollForLogin(httpClient, serverHost, qrCodeToken)
-	if err != nil {
-		return nil, fmt.Errorf("error polling for login: %v", err)
+	return nil
+}
+
+func runShowCountryCodes(cmd *cobra.Command, args []string) error {
+	search, _ := cmd.Flags().GetString("search")
+
+	var filteredCountries []CountryCode
+	for _, country := range CountryCodesData {
+		if search != "" {
+			searchLower := strings.ToLower(search)
+			countryName := strings.ToLower(country.N)
+			if !strings.Contains(countryName, searchLower) && country.C != search {
+				continue
+			}
+		}
+
+		filteredCountries = append(filteredCountries, country)
 	}
 
-	// Check if logged in email matches expected
-	if loginResult.Email != email {
-		fmt.Println("Logged in with different email than expected!")
-		fmt.Printf("Expected: %s, Got: %s\n", email, loginResult.Email)
-		fmt.Println("Continue anyway? (y/N): ")
-		var response string
-		fmt.Scanln(&response)
-		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
-			return nil, fmt.Errorf("email mismatch, authentication cancelled")
+	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("Country Codes")
+
+	if search != "" {
+		fmt.Printf(" (search: '%s')", search)
+	}
+
+	fmt.Println(":")
+	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("%-8s %-3s %-25s %s\n", "CODE", "ISO", "COUNTRY", "CONTINENT")
+	fmt.Println(strings.Repeat("-", 70))
+
+	displayLimit := 50
+
+	for i, country := range filteredCountries {
+		if i >= displayLimit {
+			fmt.Printf("... and %d more countries\n", len(filteredCountries)-displayLimit)
+			fmt.Println("\nUse filters to narrow results:")
+			fmt.Println("  --search \"germany\"     Search by name")
+			break
+		}
+
+		countryName := country.N
+		if len(countryName) > 25 {
+			countryName = countryName[:22] + "..."
+		}
+
+		fmt.Printf("%-8s %-3s %-25s %s\n",
+			country.C,
+			country.A,
+			countryName,
+			country.Continent)
+	}
+
+	fmt.Println(strings.Repeat("-", 70))
+	fmt.Printf("Total: %d countries", len(filteredCountries))
+	if len(filteredCountries) != len(CountryCodesData) {
+		fmt.Printf(" (filtered from %d)", len(CountryCodesData))
+	}
+	fmt.Println()
+
+	if search == "" {
+		fmt.Println("\nTip: Use filters to find countries faster:")
+		fmt.Println("  tuya-ipc-terminal auth show-country-codes --search germany")
+	}
+
+	fmt.Println("\nUsage in authentication:")
+	fmt.Println("  tuya-ipc-terminal auth add --password eu-central user@example.com")
+	fmt.Println("  (You'll be prompted to select your country code)")
+
+	return nil
+}
+
+func promptAuthMethod() string {
+	fmt.Println("Choose authentication method:")
+	fmt.Println("1. QR Code (default)")
+	fmt.Println("2. Email/Password")
+	fmt.Print("Enter choice (1-2): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	choice, _ := reader.ReadString('\n')
+	choice = strings.TrimSpace(choice)
+
+	switch choice {
+	case "2":
+		return "password"
+	default:
+		return "qr"
+	}
+}
+
+func promptPassword() (string, error) {
+	fmt.Print("Enter password: ")
+
+	password, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		return "", fmt.Errorf("failed to read password: %v", err)
+	}
+
+	return string(password), nil
+}
+
+func promptDirectCountryCode() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print("\nEnter your country code: ")
+		input, _ := reader.ReadString('\n')
+		countryCode := strings.TrimSpace(input)
+
+		if countryCode == "" {
+			fmt.Println("❌ Country code cannot be empty. Try again.")
+			continue
+		}
+
+		if countryName := getCountryNameFromCode(countryCode); countryName != "Unknown" {
+			fmt.Printf("✅ Found: %s (Code: %s)\n", countryName, countryCode)
+			return countryCode, nil
+		}
+
+		fmt.Printf("❌ Country code '%s' not found.\n", countryCode)
+
+		if suggestions := findSimilarCodes(countryCode); len(suggestions) > 0 {
+			fmt.Println("Did you mean:")
+			for i, country := range suggestions {
+				if i >= 3 {
+					break
+				}
+				fmt.Printf("  %s - %s\n", country.C, country.N)
+			}
+		}
+	}
+}
+
+func findSimilarCodes(input string) []CountryCode {
+	var similar []CountryCode
+
+	for _, country := range CountryCodesData {
+		if len(input) > 0 && len(country.C) > 0 {
+			if strings.HasPrefix(country.C, input[:1]) {
+				similar = append(similar, country)
+			}
 		}
 	}
 
-	// Create session data
+	if len(similar) == 0 {
+		targetLen := len(input)
+		for _, country := range CountryCodesData {
+			if len(country.C) == targetLen {
+				similar = append(similar, country)
+				if len(similar) >= 5 {
+					break
+				}
+			}
+		}
+	}
+
+	return similar
+}
+
+func getCountryNameFromCode(code string) string {
+	for _, country := range CountryCodesData {
+		if country.C == code {
+			return country.N
+		}
+	}
+	return "Unknown"
+}
+
+func performPasswordAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
+	serverHost := region.Host
+
+	password, err := promptPassword()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get password: %v", err)
+	}
+
+	countryCode, err := promptDirectCountryCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get country code: %v", err)
+	}
+
+	httpClient := createHTTPClientWithSession(nil)
+
+	fmt.Println("\nAuthenticating with email/password...")
+
+	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, countryCode)
+	if err != nil {
+		return nil, fmt.Errorf("password authentication failed: %v", err)
+	}
+
 	sessionData := &tuya.SessionData{
 		LoginResult:   loginResult,
 		Cookies:       extractCookies(httpClient, serverHost),
@@ -401,7 +598,52 @@ func performAuthentication(region tuya.Region, email string) (*tuya.SessionData,
 	return sessionData, nil
 }
 
-// createHTTPClientWithSession creates an HTTP client with session cookies
+func performQRAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
+	serverHost := region.Host
+
+	httpClient := createHTTPClientWithSession(nil)
+
+	fmt.Println("Generating QR code...")
+	qrCodeToken, err := tuya.GenerateQRCode(httpClient, serverHost)
+	if err != nil {
+		return nil, fmt.Errorf("error generating QR code: %v", err)
+	}
+
+	qrterminal.Generate("tuyaSmart--qrLogin?token="+qrCodeToken, qrterminal.L, os.Stdout)
+	fmt.Printf("\nPlease scan the QR code with the Tuya Smart / Smart Life app.\n")
+	fmt.Printf("Make sure to use the account with email: %s\n", email)
+	fmt.Println("\nPress Enter after scanning to continue...")
+	fmt.Scanln()
+
+	fmt.Println("Polling for login status...")
+	loginResult, err := tuya.PollForLogin(httpClient, serverHost, qrCodeToken)
+	if err != nil {
+		return nil, fmt.Errorf("error polling for login: %v", err)
+	}
+
+	if loginResult.Email != email {
+		fmt.Println("Logged in with different email than expected!")
+		fmt.Printf("Expected: %s, Got: %s\n", email, loginResult.Email)
+		fmt.Println("Continue anyway? (y/N): ")
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			return nil, fmt.Errorf("email mismatch, authentication cancelled")
+		}
+	}
+
+	sessionData := &tuya.SessionData{
+		LoginResult:   loginResult,
+		Cookies:       extractCookies(httpClient, serverHost),
+		LastValidated: time.Now(),
+		ServerHost:    serverHost,
+		Region:        region.Name,
+		UserEmail:     loginResult.Email,
+	}
+
+	return sessionData, nil
+}
+
 func createHTTPClientWithSession(session *tuya.SessionData) *http.Client {
 	jar, err := cookiejar.New(&cookiejar.Options{
 		PublicSuffixList: publicsuffix.List,
@@ -435,7 +677,6 @@ func createHTTPClientWithSession(session *tuya.SessionData) *http.Client {
 	}
 }
 
-// extractCookies extracts cookies from HTTP client for storage
 func extractCookies(client *http.Client, serverHost string) []*tuya.Cookie {
 	var cookies []*tuya.Cookie
 	if client.Jar != nil {

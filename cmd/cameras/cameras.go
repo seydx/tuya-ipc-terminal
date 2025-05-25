@@ -18,12 +18,10 @@ import (
 
 var storageManager *storage.StorageManager
 
-// SetStorageManager sets the storage manager instance
 func SetStorageManager(sm *storage.StorageManager) {
 	storageManager = sm
 }
 
-// NewCamerasCmd creates the cameras command
 func NewCamerasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cameras",
@@ -38,7 +36,6 @@ func NewCamerasCmd() *cobra.Command {
 	return cmd
 }
 
-// newListCmd creates the list command
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -53,7 +50,6 @@ func newListCmd() *cobra.Command {
 	return cmd
 }
 
-// newRefreshCmd creates the refresh command
 func newRefreshCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "refresh",
@@ -63,7 +59,6 @@ func newRefreshCmd() *cobra.Command {
 	}
 }
 
-// newInfoCmd creates the info command
 func newInfoCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "info [camera-id]",
@@ -74,7 +69,6 @@ func newInfoCmd() *cobra.Command {
 	}
 }
 
-// runListCameras handles the list command
 func runListCameras(cmd *cobra.Command, args []string) error {
 	userFilter, _ := cmd.Flags().GetString("user")
 
@@ -120,7 +114,6 @@ func runListCameras(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runRefreshCameras handles the refresh command
 func runRefreshCameras(cmd *cobra.Command, args []string) error {
 	fmt.Println("Refreshing camera discovery...")
 
@@ -164,7 +157,6 @@ func runRefreshCameras(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runCameraInfo handles the info command
 func runCameraInfo(cmd *cobra.Command, args []string) error {
 	deviceID := args[0]
 
@@ -226,7 +218,6 @@ func runCameraInfo(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// discoverCamerasForUser discovers cameras for a specific user
 func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, error) {
 	if user.SessionData == nil {
 		return nil, errors.New("user has no valid session data")
@@ -313,7 +304,6 @@ func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, er
 	return allCameras, nil
 }
 
-// createHTTPClientWithSession creates an HTTP client with session cookies
 func createHTTPClientWithSession(session *tuya.SessionData) *http.Client {
 	jar, err := cookiejar.New(&cookiejar.Options{
 		PublicSuffixList: publicsuffix.List,
@@ -347,7 +337,6 @@ func createHTTPClientWithSession(session *tuya.SessionData) *http.Client {
 	}
 }
 
-// getUserFromKey gets user session from user key
 func getUserFromKey(userKey string) (*storage.UserSession, error) {
 	users, err := storageManager.ListUsers()
 	if err != nil {
@@ -363,7 +352,6 @@ func getUserFromKey(userKey string) (*storage.UserSession, error) {
 	return nil, fmt.Errorf("user not found for key: %s", userKey)
 }
 
-// containsDevice checks if a device is in the list of devices
 func containsDevice(devices []tuya.Device, deviceID string) bool {
 	for _, device := range devices {
 		if device.DeviceId == deviceID {
