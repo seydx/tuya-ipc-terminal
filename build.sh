@@ -1,19 +1,8 @@
 #!/bin/bash
 
-# Build script for tuya-ipc-terminal
-
 set -e
 
 echo "Building tuya-ipc-terminal..."
-
-# Check Go version
-GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-REQUIRED_VERSION="1.21"
-
-if ! printf '%s\n%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V -C; then
-    echo "Error: Go $REQUIRED_VERSION or higher is required (found: $GO_VERSION)"
-    exit 1
-fi
 
 # Get dependencies
 echo "Getting dependencies..."
@@ -23,16 +12,9 @@ go mod tidy
 echo "Verifying packages..."
 go list ./...
 
-# Run tests if any exist
-if [ -f "*_test.go" ]; then
-    echo "Running tests..."
-    go test ./...
-fi
-
 # Build for current platform
 echo "Building binary..."
 go build -ldflags "-s -w" -o tuya-ipc-terminal .
-
 echo "Build complete: ./tuya-ipc-terminal"
 
 # Show file size
