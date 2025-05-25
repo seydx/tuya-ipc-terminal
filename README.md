@@ -1,26 +1,27 @@
 # Tuya IPC Terminal
 
-A CLI tool to connect Tuya Smart Cameras to RTSP clients through reverse-engineered Tuya browser client APIs.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue.svg)](https://golang.org/)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 
-## Features
+A powerful CLI tool to connect Tuya Smart Cameras to RTSP clients through reverse-engineered Tuya browser client APIs. Stream your Tuya cameras directly to any RTSP-compatible media player or home automation system.
 
-- **Multi-user Authentication**: Support for multiple Tuya Smart accounts across different regions
-- **Session Management**: Persistent authentication with automatic session validation
-- **Camera Discovery**: Automatic discovery of all cameras from authenticated accounts
-- **RTSP Server**: Provides RTSP endpoints for Tuya cameras with WebRTC-to-RTP bridge
-- **Real-time Streaming**: Direct camera access via WebRTC with RTSP output
-- **Multi-client Support**: Multiple RTSP clients can connect to the same camera stream
-- **H265/HEVC Support**: Stream cameras using H265 codec for better performance
-- **Two-way Audio**: With two-way audio support for compatible cameras
+## ✨ Features
 
-## Installation
+- 🔐 **Dual Authentication**: QR code scanning OR email/password login
+- 🌍 **Multi-Region Support**: Support for all Tuya regions (EU, US, China, India)
+- 👥 **Multi-User Management**: Handle multiple Tuya Smart accounts simultaneously
+- 📡 **Session Persistence**: Automatic session management with validation
+- 🎥 **Camera Discovery**: Automatic detection of all cameras from authenticated accounts
+- 🎬 **RTSP Server**: WebRTC-to-RTSP bridge for universal compatibility
+- 🚀 **Real-time Streaming**: Direct camera access with minimal latency
+- 🔄 **Multi-Client Support**: Multiple RTSP clients per camera stream
+- 🎯 **H265/HEVC Ready**: Advanced codec support for optimal performance
+- 🎤 **Two-Way Audio**: Bidirectional audio for compatible cameras
 
-### Prerequisites
+## 🚀 Quick Start
 
-- Go 1.21 or later
-- Tuya Smart or Smart Life mobile app for QR code authentication
-
-### Build from Source
+### Installation
 
 ```bash
 git clone <repository-url>
@@ -29,352 +30,126 @@ chmod +x build.sh
 ./build.sh
 ```
 
-## Quick Start
+### 1-Minute Setup
 
-1. **Add a user account**:
-   ```bash
-   ./tuya-ipc-terminal auth add eu-central user@example.com
-   ```
-
-2. **Discover cameras**:
-   ```bash
-   ./tuya-ipc-terminal cameras refresh
-   ```
-
-3. **Start RTSP server**:
-   ```bash
-   ./tuya-ipc-terminal rtsp start --port 8554
-   ```
-
-4. **Connect with media player**:
-   ```bash
-   ffplay rtsp://localhost:8554/MyCamera
-   # or
-   vlc rtsp://localhost:8554/MyCamera
-   ```
-
-## Usage
-
-### Authentication Management
-
-#### List authenticated users
 ```bash
-./tuya-ipc-terminal auth list
-```
-
-#### Add new user
-```bash
-./tuya-ipc-terminal auth add [region] [email]
-```
-
-Available regions:
-- `eu-central` - Central Europe
-- `eu-east` - East Europe  
-- `us-west` - West America
-- `us-east` - East America
-- `china` - China
-- `india` - India
-
-Example:
-```bash
+# 1. Add your Tuya account (interactive)
 ./tuya-ipc-terminal auth add eu-central user@example.com
-```
 
-#### Remove user
-```bash
-./tuya-ipc-terminal auth remove eu-central user@example.com
-```
-
-#### Refresh user session
-```bash
-./tuya-ipc-terminal auth refresh eu-central user@example.com
-```
-
-#### Test session validity
-```bash
-./tuya-ipc-terminal auth test eu-central user@example.com
-```
-
-### Camera Management
-
-#### List all cameras
-```bash
-./tuya-ipc-terminal cameras list
-```
-
-#### List cameras for specific user
-```bash
-./tuya-ipc-terminal cameras list --user eu-central_user_at_example_com
-```
-
-#### Refresh camera discovery
-```bash
+# 2. Discover your cameras
 ./tuya-ipc-terminal cameras refresh
-```
 
-#### Get detailed camera information
-```bash
-./tuya-ipc-terminal cameras info [camera-id-or-name]
-```
-
-### RTSP Server Management
-
-#### Start RTSP server
-```bash
+# 3. Start streaming
 ./tuya-ipc-terminal rtsp start --port 8554
-```
 
-#### Start as daemon (background)
-```bash
-./tuya-ipc-terminal rtsp start --port 8554 --daemon
-```
-
-#### Stop RTSP server
-```bash
-./tuya-ipc-terminal rtsp stop
-```
-
-#### Show server status
-```bash
-./tuya-ipc-terminal rtsp status
-```
-
-#### List available endpoints
-```bash
-./tuya-ipc-terminal rtsp list-endpoints
-```
-
-## RTSP Streaming
-
-### Connecting to Camera Streams
-
-Once the RTSP server is running, you can connect to camera streams using any RTSP-compatible media player:
-
-#### Using FFplay
-```bash
+# 4. Watch your cameras
 ffplay rtsp://localhost:8554/MyCamera
 ```
 
-#### Using VLC Media Player
+## 📖 Complete Documentation
+
+### 🔐 Authentication Management
+
+#### Two Authentication Methods
+
+**🎯 QR Code**
 ```bash
-vlc rtsp://localhost:8554/MyCamera
+./tuya-ipc-terminal auth add eu-central user@example.com
+# Scan QR code with Tuya Smart/Smart Life app
 ```
 
-#### Using FFmpeg (recording)
+**🔑 Email/Password**
 ```bash
-ffmpeg -i rtsp://localhost:8554/MyCamera -c copy output.mp4
+./tuya-ipc-terminal auth add eu-central user@example.com --password
+# Enter password and select country code interactively
 ```
 
-### Stream URLs
+#### User Management Commands
+
+```bash
+# List all authenticated users
+./tuya-ipc-terminal auth list
+
+# Remove user authentication
+./tuya-ipc-terminal auth remove eu-central user@example.com
+
+# Refresh expired session
+./tuya-ipc-terminal auth refresh eu-central user@example.com
+
+# Test session validity
+./tuya-ipc-terminal auth test eu-central user@example.com
+```
+
+#### 🌍 Regional Information
+
+```bash
+# Show all available regions
+./tuya-ipc-terminal auth show-regions
+
+# Show country codes for password authentication
+./tuya-ipc-terminal auth show-country-codes
+./tuya-ipc-terminal auth show-country-codes --search germany
+```
+
+**Available Regions:**
+| Region | Endpoint | Description |
+|--------|----------|-------------|
+| `eu-central` | protect-eu.ismartlife.me | Central Europe |
+| `eu-east` | protect-we.ismartlife.me | East Europe |
+| `us-west` | protect-us.ismartlife.me | West America |
+| `us-east` | protect-ue.ismartlife.me | East America |
+| `china` | protect.ismartlife.me | China |
+| `india` | protect-in.ismartlife.me | India |
+
+### 📹 Camera Management
+
+```bash
+# List all discovered cameras
+./tuya-ipc-terminal cameras list
+
+# List cameras for specific user
+./tuya-ipc-terminal cameras list --user eu-central_user_at_example_com
+
+# Refresh camera discovery
+./tuya-ipc-terminal cameras refresh
+
+# Get detailed camera information
+./tuya-ipc-terminal cameras info [camera-id-or-name]
+```
+
+### 📡 RTSP Server Management
+
+```bash
+# Start RTSP server
+./tuya-ipc-terminal rtsp start --port 8554
+
+# Start as background daemon
+./tuya-ipc-terminal rtsp start --port 8554 --daemon
+
+# Stop RTSP server
+./tuya-ipc-terminal rtsp stop
+
+# Check server status
+./tuya-ipc-terminal rtsp status
+
+# List all available camera endpoints
+./tuya-ipc-terminal rtsp list-endpoints
+```
+
+## 🎬 RTSP Streaming Guide
+
+### 📺 Connecting to Camera Streams
 
 Camera streams are available at:
 ```
 rtsp://localhost:[port]/[camera-name]
+rtsp://localhost:[port]/[camera-name]/sd  # Sub-stream (lower quality)
 ```
 
-For example:
-- `rtsp://localhost:8554/LivingRoomCamera`
-- `rtsp://localhost:8554/FrontDoor`
-- `rtsp://localhost:8554/BackyardCam`
-- `rtsp://localhost:8554/BackyardCam/sd` (for sub stream)
 
-Use `rtsp list-endpoints` to see all available camera URLs.
+### 🏠 Home Automation Integration
 
-## Authentication Process
-
-1. Run `./tuya-ipc-terminal auth add [region] [email]`
-2. A QR code will be displayed in your terminal
-3. Open Tuya Smart or Smart Life app
-4. Scan the QR code to authenticate
-5. The session will be saved for future use
-
-## Data Storage
-
-All authentication sessions and camera information are stored in the `.tuya-data` directory:
-
-```
-.tuya-data/
-├── user_eu-central_user_at_example_com.json  # User sessions
-├── user_us-west_another_at_example_com.json
-└── cameras.json                              # Camera registry
-```
-
-## Architecture
-
-The project is structured as follows:
-
-```
-tuya-ipc-terminal/
-├── cmd/
-│   ├── auth/          # Authentication commands
-│   ├── cameras/       # Camera management commands
-│   ├── rtsp/          # RTSP server commands
-│   └── root.go        # Root command setup
-├── pkg/
-│   ├── tuya/          # Tuya API client
-│   ├── storage/       # Session & camera storage
-│   ├── rtsp/          # RTSP server implementation
-│   ├── webrtc/        # WebRTC implementation
-│   └── utils/         # Utilities
-└── main.go
-```
-
-## Technical Details
-
-### WebRTC to RTSP Bridge
-
-The tool creates a bridge between Tuya's WebRTC streams and standard RTSP:
-
-1. **WebRTC Connection**: Establishes WebRTC connection to camera via Tuya's MQTT system
-2. **RTP Packet Processing**: Receives RTP packets from WebRTC peer connection
-3. **RTSP Server**: Serves processed streams via standard RTSP protocol
-4. **Multi-client Support**: Multiple RTSP clients can connect to the same camera
-
-### Supported Features
-
-- **Video Codecs**: H.264, H.265/HEVC
-- **Audio Codecs**: PCMU, PCMA, PCML
-- **Stream Qualities**: HD (main stream), SD (sub stream)
-- **Multi-client**: Multiple RTSP clients per camera
-- **Auto-cleanup**: Automatic cleanup of inactive streams
-- **Session Persistence**: Persistent authentication across restarts
-
-### Stream Management
-
-- **On-demand**: Streams start when first client connects
-- **Auto-stop**: Streams stop when last client disconnects
-- **Resource Efficient**: Minimal resource usage when no clients connected
-- **Error Recovery**: Automatic reconnection on connection failures
-
-## Supported Camera Types
-
-The tool automatically detects cameras with the following categories:
-- `sp` - Smart cameras
-- `dghsxj` - Additional camera type
-
-## Performance
-
-- **Low Latency**: Direct WebRTC connection minimizes delay
-- **Efficient**: Single WebRTC connection serves multiple RTSP clients
-- **Scalable**: Supports multiple cameras and users simultaneously
-- **Resource Aware**: Automatic cleanup of unused connections
-
-## Troubleshooting
-
-### Authentication Issues
-
-If you get authentication errors:
-
-1. Check session validity:
-   ```bash
-   ./tuya-ipc-terminal auth test [region] [email]
-   ```
-
-2. Refresh the session:
-   ```bash
-   ./tuya-ipc-terminal auth refresh [region] [email]
-   ```
-
-3. If problems persist, remove and re-add the user:
-   ```bash
-   ./tuya-ipc-terminal auth remove [region] [email]
-   ./tuya-ipc-terminal auth add [region] [email]
-   ```
-
-### No Cameras Found
-
-1. Ensure you have authenticated users:
-   ```bash
-   ./tuya-ipc-terminal auth list
-   ```
-
-2. Refresh camera discovery:
-   ```bash
-   ./tuya-ipc-terminal cameras refresh
-   ```
-
-3. Check if cameras are online in the Tuya Smart app
-
-### RTSP Connection Issues
-
-1. Check server status:
-   ```bash
-   ./tuya-ipc-terminal rtsp status
-   ```
-
-2. Verify endpoints:
-   ```bash
-   ./tuya-ipc-terminal rtsp list-endpoints
-   ```
-
-3. Test with simple media player:
-   ```bash
-   ffplay rtsp://localhost:8554/[camera-path]
-   ```
-
-4. Check camera is online:
-   ```bash
-   ./tuya-ipc-terminal cameras list --online-only
-   ```
-
-### WebRTC Connection Issues
-
-- Ensure cameras are online in Tuya Smart app
-- Check network connectivity to Tuya servers
-- Verify MQTT connection is stable
-- Look for WebRTC error messages in server logs
-
-### Stream Quality Issues
-
-1. Check camera supports desired quality:
-   ```bash
-   ./tuya-ipc-terminal cameras info [camera-id]
-   ```
-
-2. Try different stream resolution (HD vs SD)
-3. Check network bandwidth and stability
-
-Note: Some cameras may not support all resolutions.
-
-## Advanced Usage
-
-### Running as System Service
-
-Create a systemd service file for background operation:
-
-```ini
-[Unit]
-Description=Tuya IPC Terminal RTSP Server
-After=network.target
-
-[Service]
-Type=simple
-User=your-user
-WorkingDirectory=/path/to/tuya-ipc-terminal
-ExecStart=/path/to/tuya-ipc-terminal rtsp start --port 8554
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Multiple Server Instances
-
-Run multiple instances on different ports:
-
-```bash
-# Instance 1 - Port 8554
-./tuya-ipc-terminal rtsp start --port 8554 --daemon
-
-# Instance 2 - Port 8555  
-./tuya-ipc-terminal rtsp start --port 8555 --daemon
-```
-
-### Integration with Home Assistant
-
-Add cameras to Home Assistant using RTSP integration:
-
+**Home Assistant**
 ```yaml
 camera:
   - platform: generic
@@ -386,86 +161,217 @@ camera:
     name: "Front Door Camera"
 ```
 
-### Integration with Go2RTC:
-
+**Go2RTC Integration**
 ```yaml
 streams:
-  MyCamera:
-    - rtsp://localhost:8554/MyCamera
+  living_room:
+    - rtsp://localhost:8554/LivingRoomCamera
+  front_door:
+    - rtsp://localhost:8554/FrontDoor
 ```
 
-## Examples
 
-### Complete Setup Workflow
+## 🏗️ Advanced Usage
 
+### 🔧 Running as System Service
+
+**Create systemd service:**
 ```bash
-# 1. Build the application
-./build.sh
+sudo tee /etc/systemd/system/tuya-rtsp.service > /dev/null <<EOF
+[Unit]
+Description=Tuya IPC Terminal RTSP Server
+After=network.target
 
-# 2. Add your Tuya account
-./tuya-ipc-terminal auth add eu-central user@example.com
-# Scan QR code with Tuya Smart app
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$PWD
+ExecStart=$PWD/tuya-ipc-terminal rtsp start --port 8554
+Restart=always
+RestartSec=10
 
-# 3. Discover cameras
-./tuya-ipc-terminal cameras refresh
+[Install]
+WantedBy=multi-user.target
+EOF
 
-# 4. List available cameras
-./tuya-ipc-terminal cameras list
-
-# 5. Start RTSP server
-./tuya-ipc-terminal rtsp start --port 8554
-
-# 6. Connect with media player
-ffplay rtsp://localhost:8554/MyCamera
+sudo systemctl enable tuya-rtsp
+sudo systemctl start tuya-rtsp
 ```
 
-### Multi-user Setup
+### 🔀 Multiple Server Instances
 
 ```bash
-# Add multiple accounts
-./tuya-ipc-terminal auth add eu-central user1@example.com
-./tuya-ipc-terminal auth add us-west user2@example.com
+# Different ports for different purposes
+./tuya-ipc-terminal rtsp start --port 8554 --daemon  # Main cameras
+./tuya-ipc-terminal rtsp start --port 8555 --daemon  # Backup/secondary
+```
 
-# Refresh to get all cameras
+### 👥 Multi-User Setup Example
+
+```bash
+# Add accounts from different regions
+./tuya-ipc-terminal auth add eu-central home@example.com      # European account
+./tuya-ipc-terminal auth add --password us-west work@company.com  # US business account
+./tuya-ipc-terminal auth add china personal@example.cn        # Chinese account
+
+# Discover all cameras
 ./tuya-ipc-terminal cameras refresh
 
-# List all users and cameras
+# List everything
 ./tuya-ipc-terminal auth list
 ./tuya-ipc-terminal cameras list
 ```
 
-## API Integration
+## 🔄 Data Flow
 
-The tool can be extended with additional REST API endpoints for integration with other systems. The modular architecture allows easy addition of HTTP API servers alongside the RTSP server.
+1. **Authentication** → Tuya Cloud API
+2. **Discovery** → MQTT + Tuya API
+3. **WebRTC Connection** → Direct camera stream
+4. **RTP Processing** → Video/audio packet handling
+5. **RTSP Server** → Standard protocol output
 
-## Contributing
+## 💾 Data Storage
 
-Contributions are welcome! Areas for improvement:
+```
+.tuya-data/
+├── user_eu-central_user_at_example_com.json    # User sessions
+├── user_us-west_business_at_company_com.json   # Multiple accounts
+└── cameras.json                                # Camera registry
+```
 
-- REST API for camera control
-- PTZ (Pan/Tilt/Zoom) control
-- WebUI for management
+## 🛠️ Technical Details
 
-Please feel free to submit issues and pull requests.
+### 🎥 Supported Features
 
-## Limitations
+| Feature | Status | Notes |
+|---------|--------|-------|
+| H.264 Video | ✅ | Universal support |
+| H.265/HEVC | ✅ | Better compression |
+| PCMU Audio | ✅ | Standard quality |
+| PCMA Audio | ✅ | Alternative codec |
+| HD Streams | ✅ | Main camera stream |
+| SD Streams | ✅ | Sub-stream, lower bandwidth |
+| Multi-client | ✅ | Multiple viewers per camera |
+| Two-way Audio | ✅ | Camera dependent |
 
-- Requires active internet connection to Tuya servers
-- Camera streams depend on Tuya Cloud availability  
-- QR code authentication requires mobile app
-- Some advanced camera features may not be supported
-- Session management is basic and may require manual refresh
+### 🎯 Supported Camera Types
 
-## Security Considerations
+| Category | Description | Compatibility |
+|----------|-------------|---------------|
+| `sp` | Smart cameras | ✅ Full support |
+| `dghsxj` | Additional camera type | ✅ Full support |
+| Others | Generic Tuya cameras | ⚠️ May work |
 
-- Sessions are stored locally in JSON files
-- No encryption of stored credentials beyond Tuya's own
-- Firewall configuration recommended for external access
+## 🐛 Troubleshooting
 
-## License
+### 🔐 Authentication Issues
 
-MIT
+**Problem**: Login fails
+```bash
+# 1. Check session status
+./tuya-ipc-terminal auth test eu-central user@example.com
 
-## Disclaimer
+# 2. Try refreshing
+./tuya-ipc-terminal auth refresh eu-central user@example.com
 
-This tool is created through reverse engineering of Tuya's web client. Use at your own risk and ensure compliance with Tuya's terms of service. The authors are not responsible for any issues arising from the use of this software.
+# 3. Re-authenticate if needed
+./tuya-ipc-terminal auth remove eu-central user@example.com
+./tuya-ipc-terminal auth add eu-central user@example.com
+```
+
+**Problem**: Country code not found (password login)
+```bash
+# Search for your country
+./tuya-ipc-terminal auth show-country-codes --search germany
+./tuya-ipc-terminal auth show-country-codes --search "united states"
+```
+
+### 📹 Camera Discovery Issues
+
+**Problem**: No cameras found
+```bash
+# 1. Verify authentication
+./tuya-ipc-terminal auth list
+
+# 2. Force refresh
+./tuya-ipc-terminal cameras refresh
+
+# 3. Check if cameras are online in Tuya Smart app
+./tuya-ipc-terminal cameras list --verbose
+```
+
+### 📡 RTSP Connection Issues
+
+**Problem**: Can't connect to stream
+```bash
+# 1. Check server status
+./tuya-ipc-terminal rtsp status
+
+# 2. List available streams
+./tuya-ipc-terminal rtsp list-endpoints
+
+# 3. Test with simple player
+ffplay rtsp://localhost:8554/CameraName
+```
+
+**Problem**: Poor stream quality
+```bash
+# Try sub-stream for lower bandwidth
+ffplay rtsp://localhost:8554/CameraName/sd
+
+# Check camera capabilities
+./tuya-ipc-terminal cameras info "Camera Name"
+```
+
+### Development Setup
+
+```bash
+git clone <repository-url>
+cd tuya-ipc-terminal
+go mod download
+go run main.go --help
+```
+
+## ⚠️ Limitations & Considerations
+
+### Technical Limitations
+- 🌐 Requires active internet connection to Tuya servers
+- ☁️ Dependent on Tuya Cloud availability
+- 📱 QR authentication requires mobile app
+- 🔧 Some advanced camera features may not be supported
+
+### Security Considerations
+- 🔒 Sessions stored locally in JSON files
+- 🛡️ No additional encryption beyond Tuya's implementation
+- 🔥 Firewall configuration recommended for external access
+- 🔐 Consider network security for RTSP streams
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) for details.
+
+## ⚠️ Disclaimer
+
+This tool is created through reverse engineering of Tuya's web client APIs. Use responsibly and ensure compliance with:
+
+- Tuya's Terms of Service
+- Local privacy laws and regulations
+- Camera usage regulations in your jurisdiction
+
+The authors are not responsible for any issues arising from the use of this software.
+
+## 🆘 Support
+
+Having issues? Here's how to get help:
+
+1. 📖 Check this README for common solutions
+2. 🐛 Search existing [GitHub Issues](link-to-issues)
+3. 💬 Create a new issue with:
+   - Your operating system
+   - Go version (`go version`)
+   - Error messages
+   - Steps to reproduce
+
+---
+
+**⭐ If this project helps you, please consider giving it a star on GitHub!**
