@@ -388,11 +388,25 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 	}
 
 	wb.cameraClient.HandleCandidate = func(candidate tuya.CandidateFrame) {
-		core.Logger.Trace().Msgf("Received ICE candidate: %s", strings.Split(candidate.Candidate, "\r\n")[0])
+		candidateStr := strings.TrimSpace(candidate.Candidate)
+		core.Logger.Trace().Msgf("Received ICE candidate: %s", candidateStr)
 
-		if candidate.Candidate != "" {
-			err := wb.peerConnection.AddICECandidate(pion.ICECandidateInit{Candidate: candidate.Candidate})
-			if err != nil {
+		if candidateStr != "" {
+			// Remove "a=" prefix if present
+			if strings.HasPrefix(candidateStr, "a=") {
+				candidateStr = candidateStr[2:]
+			}
+
+			// Ensure candidate ends with CRLF
+			if !strings.HasSuffix(candidateStr, "\r\n") && !strings.HasSuffix(candidateStr, "\n") {
+				candidateStr = candidateStr + "\r\n"
+			}
+
+			core.Logger.Trace().Msgf("Adding ICE candidate: %s", strings.TrimSpace(candidateStr))
+
+			if err := wb.peerConnection.AddICECandidate(pion.ICECandidateInit{
+				Candidate: strings.TrimSpace(candidateStr),
+			}); err != nil {
 				wb.handleError(err)
 			}
 		}
