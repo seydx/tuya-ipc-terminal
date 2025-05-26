@@ -11,12 +11,12 @@ type CountryCode struct {
 }
 
 var AvailableRegions = []tuya.Region{
-	{"eu-central", "protect-eu.ismartlife.me", "Central Europe"},
-	{"eu-east", "protect-we.ismartlife.me", "East Europe"},
-	{"us-west", "protect-us.ismartlife.me", "West America"},
-	{"us-east", "protect-ue.ismartlife.me", "East America"},
-	{"china", "protect.ismartlife.me", "China"},
-	{"india", "protect-in.ismartlife.me", "India"},
+	{"eu-central", "protect-eu.ismartlife.me", "Central Europe", "EU"},
+	{"eu-east", "protect-we.ismartlife.me", "East Europe", "EU"},
+	{"us-west", "protect-us.ismartlife.me", "West America", "AZ"},
+	{"us-east", "protect-ue.ismartlife.me", "East America", "AZ"},
+	{"china", "protect.ismartlife.me", "China", "AY"},
+	{"india", "protect-in.ismartlife.me", "India", "IN"},
 }
 
 var CountryCodesData = []CountryCode{

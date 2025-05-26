@@ -6,6 +6,7 @@ type Region struct {
 	Name        string `json:"name"`
 	Host        string `json:"host"`
 	Description string `json:"description"`
+	Continent   string `json:"continent"`
 }
 
 type Cookie struct {

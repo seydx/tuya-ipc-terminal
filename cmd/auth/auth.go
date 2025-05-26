@@ -201,13 +201,13 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid email format: %s", email)
 	}
 
-	existingUser, err := storageManager.GetUser(regionName, email)
+	existingUser, err := storageManager.GetUser(selectedRegion.Name, email)
 	if err != nil {
 		return fmt.Errorf("failed to check existing user: %v", err)
 	}
 
 	if existingUser != nil {
-		fmt.Printf("User %s in region %s already exists.\n", email, regionName)
+		fmt.Printf("User %s in region %s already exists.\n", email, selectedRegion.Name)
 		fmt.Println("Do you want to re-authenticate? (y/N): ")
 
 		var response string
@@ -224,7 +224,7 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Printf("Adding user %s in region %s (%s) using %s authentication...\n",
-		email, regionName, selectedRegion.Description, authMethodStr)
+		email, selectedRegion.Name, selectedRegion.Description, authMethodStr)
 
 	var sessionData *tuya.SessionData
 	if usePassword {
@@ -237,12 +237,12 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("authentication failed: %v", err)
 	}
 
-	if err := storageManager.SaveUser(regionName, email, sessionData); err != nil {
+	if err := storageManager.SaveUser(selectedRegion.Name, email, sessionData); err != nil {
 		return fmt.Errorf("failed to save user session: %v", err)
 	}
 
 	fmt.Printf("\n✓ Successfully added user %s (%s) in region %s\n",
-		sessionData.LoginResult.Nickname, email, regionName)
+		sessionData.LoginResult.Nickname, email, selectedRegion.Name)
 	fmt.Printf("User ID: %s\n", sessionData.LoginResult.Uid)
 
 	return nil
@@ -497,73 +497,6 @@ func promptPassword() (string, error) {
 	return string(password), nil
 }
 
-func promptDirectCountryCode() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Print("\nEnter your country code: ")
-		input, _ := reader.ReadString('\n')
-		countryCode := strings.TrimSpace(input)
-
-		if countryCode == "" {
-			fmt.Println("❌ Country code cannot be empty. Try again.")
-			continue
-		}
-
-		if countryName := getCountryNameFromCode(countryCode); countryName != "Unknown" {
-			fmt.Printf("✅ Found: %s (Code: %s)\n", countryName, countryCode)
-			return countryCode, nil
-		}
-
-		fmt.Printf("❌ Country code '%s' not found.\n", countryCode)
-
-		if suggestions := findSimilarCodes(countryCode); len(suggestions) > 0 {
-			fmt.Println("Did you mean:")
-			for i, country := range suggestions {
-				if i >= 3 {
-					break
-				}
-				fmt.Printf("  %s - %s\n", country.C, country.N)
-			}
-		}
-	}
-}
-
-func findSimilarCodes(input string) []CountryCode {
-	var similar []CountryCode
-
-	for _, country := range CountryCodesData {
-		if len(input) > 0 && len(country.C) > 0 {
-			if strings.HasPrefix(country.C, input[:1]) {
-				similar = append(similar, country)
-			}
-		}
-	}
-
-	if len(similar) == 0 {
-		targetLen := len(input)
-		for _, country := range CountryCodesData {
-			if len(country.C) == targetLen {
-				similar = append(similar, country)
-				if len(similar) >= 5 {
-					break
-				}
-			}
-		}
-	}
-
-	return similar
-}
-
-func getCountryNameFromCode(code string) string {
-	for _, country := range CountryCodesData {
-		if country.C == code {
-			return country.N
-		}
-	}
-	return "Unknown"
-}
-
 func performPasswordAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
 	serverHost := region.Host
 
@@ -572,16 +505,11 @@ func performPasswordAuthentication(region tuya.Region, email string) (*tuya.Sess
 		return nil, fmt.Errorf("failed to get password: %v", err)
 	}
 
-	countryCode, err := promptDirectCountryCode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get country code: %v", err)
-	}
-
 	httpClient := createHTTPClientWithSession(nil)
 
 	fmt.Println("\nAuthenticating with email/password...")
 
-	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, countryCode)
+	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, region.Continent)
 	if err != nil {
 		return nil, fmt.Errorf("password authentication failed: %v", err)
 	}
