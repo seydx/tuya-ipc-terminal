@@ -406,9 +406,11 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 		if isVideoTrack {
 			client.videoRTPPort = clientRTPPort
 			client.videoRTCPPort = clientRTCPPort
+			core.Logger.Trace().Msgf("Setup video track - Client RTP port: %d, RTCP port: %d", clientRTPPort, clientRTCPPort)
 		} else if isAudioTrack {
 			client.audioRTPPort = clientRTPPort
 			client.audioRTCPPort = clientRTCPPort
+			core.Logger.Trace().Msgf("Setup audio track - Client RTP port: %d, RTCP port: %d", clientRTPPort, clientRTCPPort)
 		} else if isBackchannel {
 			// For backchannel, setup the server listener and get actual server port
 			if client.stream != nil && client.stream.webrtcBridge != nil {
@@ -423,30 +425,33 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 				client.backAudioRTPPort = port
 				client.backAudioRTCPPort = port + 1
 			}
+			core.Logger.Trace().Msgf("Setup backchannel track - Client RTP port: %d, Server RTP port: %d", clientRTPPort, client.backAudioRTPPort)
 		}
 
 		// Build response transport
-		if client.backAudioRTPPort > 0 {
+		if isBackchannel && client.backAudioRTPPort > 0 {
 			// Include server ports for backchannel
 			responseTransport = fmt.Sprintf("RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d",
-				client.videoRTPPort, client.videoRTCPPort, client.backAudioRTPPort, client.backAudioRTCPPort)
+				clientRTPPort, clientRTCPPort, client.backAudioRTPPort, client.backAudioRTCPPort)
 		} else {
-			// No server ports for video/audio (we're only receiving)
+			// No server ports for video/audio (we're only sending to client)
 			responseTransport = fmt.Sprintf("RTP/AVP;unicast;client_port=%d-%d",
-				client.videoRTPPort, client.videoRTCPPort)
+				clientRTPPort, clientRTCPPort)
 		}
 
-		core.Logger.Trace().Msgf("UDP setup - Track type: video=%v audio=%v backchannel=%v, Client port: %d, Server port: %d",
-			isVideoTrack, isAudioTrack, isBackchannel, client.videoRTPPort, client.backAudioRTPPort)
+		core.Logger.Trace().Msgf("UDP setup - Track type: video=%v audio=%v backchannel=%v, Video port: %d, Audio port: %d, Server port: %d",
+			isVideoTrack, isAudioTrack, isBackchannel, client.videoRTPPort, client.audioRTPPort, client.backAudioRTPPort)
 
-		// Add/update UDP client with current ports
-		err := client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
-			client.videoRTPPort, client.audioRTPPort)
-		if err != nil {
-			core.Logger.Error().Err(err).Msg("Error adding UDP RTP client")
-			sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
-				"Failed to setup RTP forwarding")
-			return
+		// Add/update UDP client with current ports after video and audio setup
+		if isVideoTrack || isAudioTrack {
+			err := client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
+				client.videoRTPPort, client.audioRTPPort)
+			if err != nil {
+				core.Logger.Error().Err(err).Msg("Error adding UDP RTP client")
+				sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
+					"Failed to setup RTP forwarding")
+				return
+			}
 		}
 
 	} else {
