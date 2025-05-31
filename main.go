@@ -8,7 +8,7 @@ import (
 	"tuya-ipc-terminal/pkg/core"
 )
 
-const VERSION = "0.0.5"
+const VERSION = "0.0.6"
 
 func main() {
 	core.InitLogger()
