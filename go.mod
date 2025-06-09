@@ -9,8 +9,8 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mdp/qrterminal v1.0.1
 	github.com/pion/ice/v4 v4.0.10
-	github.com/pion/interceptor v0.1.38
-	github.com/pion/rtp v1.8.15
+	github.com/pion/interceptor v0.1.39
+	github.com/pion/rtp v1.8.18
 	github.com/pion/sdp/v3 v3.0.13
 	github.com/pion/stun/v3 v3.0.0
 	github.com/pion/webrtc/v4 v4.1.1
