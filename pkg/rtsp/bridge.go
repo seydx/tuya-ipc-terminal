@@ -136,6 +136,13 @@ func (wb *WebRTCBridge) Start() error {
 		return fmt.Errorf("failed to parse skill info: %v", err)
 	}
 
+	// Log skill information
+	core.Logger.Info().Msgf("Camera skill info: %+v", skill)
+	for i, video := range skill.Videos {
+		core.Logger.Info().Msgf("Video stream %d - StreamType: %d, CodecType: %d, Width: %d, Height: %d",
+			i, video.StreamType, video.CodecType, video.Width, video.Height)
+	}
+
 	// Determine stream settings
 	wb.streamType = tuya.GetStreamType(&skill, wb.resolution)
 	wb.isHEVC = tuya.IsHEVC(&skill, wb.streamType)
@@ -268,6 +275,11 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 				if err := packet.Unmarshal(msg.Data); err != nil {
 					// skip
 					return
+				}
+
+				// For HEVC streams, ensure correct payload type
+				if wb.isHEVC && packet.PayloadType != 100 {
+					packet.PayloadType = 100
 				}
 
 				switch packet.SSRC {

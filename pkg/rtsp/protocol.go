@@ -36,6 +36,29 @@ type RTSPResponse struct {
 	Body       string
 }
 
+type RTSPClient struct {
+	conn                 net.Conn
+	session              string
+	cameraPath           string
+	stream               *CameraStream
+	reader               *bufio.Reader
+	transportMode        TransportMode
+	clientIP            string  // Add client IP field
+	videoRTPPort         int
+	videoRTCPPort        int
+	audioRTPPort         int
+	audioRTCPPort        int
+	backAudioRTPPort     int // server-side port for back audio
+	backAudioRTCPPort    int // server-side port for back audio RTCP
+	videoRTPChannel      byte
+	videoRTCPChannel     byte
+	audioRTPChannel      byte
+	audioRTCPChannel     byte
+	backAudioRTPChannel  byte
+	backAudioRTCPChannel byte
+	setupCount           int
+}
+
 func sendRTSPResponse(conn net.Conn, statusCode int, status string, headers map[string]string, body string) error {
 	var response strings.Builder
 
@@ -445,7 +468,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 		// Add/update UDP client with current ports after video and audio setup
 		if isVideoTrack || isAudioTrack {
 			err := client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
-				client.videoRTPPort, client.audioRTPPort)
+				client.clientIP, client.videoRTPPort, client.audioRTPPort)
 			if err != nil {
 				core.Logger.Error().Err(err).Msg("Error adding UDP RTP client")
 				sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
@@ -549,9 +572,18 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 		if videoInfo != nil {
 			if isHEVC {
 				// H.265/HEVC
-				videoSdp += "m=video 0 RTP/AVP 96\r\n"
-				videoSdp += "a=rtpmap:96 H265/90000\r\n"
-				videoSdp += "a=fmtp:96 profile-id=1\r\n"
+				videoSdp += "m=video 0 RTP/AVP 100\r\n"
+				videoSdp += "a=rtpmap:100 H265/90000\r\n"
+				// Add width and height
+				videoSdp += fmt.Sprintf("a=imageattr:100 send [x=%d,y=%d] recv [x=%d,y=%d]\r\n",
+					videoInfo.Width, videoInfo.Height, videoInfo.Width, videoInfo.Height)
+				// Add more detailed fmtp line with profile and level
+				videoSdp += "a=fmtp:100 profile-id=1;level-asymmetry-allowed=1;packetization-mode=1;tier-flag=0;level-id=120\r\n"
+				// Add sprop-vps, sprop-sps, sprop-pps if available
+				if videoInfo.ProfileId != "" {
+					videoSdp += fmt.Sprintf("a=fmtp:100 sprop-vps=%s;sprop-sps=%s;sprop-pps=%s\r\n",
+						videoInfo.ProfileId, videoInfo.ProfileId, videoInfo.ProfileId)
+				}
 			} else {
 				// H.264
 				videoSdp += "m=video 0 RTP/AVP 96\r\n"
