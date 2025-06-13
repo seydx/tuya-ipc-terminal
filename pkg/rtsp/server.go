@@ -27,28 +27,6 @@ type RTSPServer struct {
 	running        bool
 }
 
-type RTSPClient struct {
-	conn                 net.Conn
-	session              string
-	cameraPath           string
-	stream               *CameraStream
-	reader               *bufio.Reader
-	transportMode        TransportMode
-	videoRTPPort         int
-	videoRTCPPort        int
-	audioRTPPort         int
-	audioRTCPPort        int
-	backAudioRTPPort     int // server-side port for back audio
-	backAudioRTCPPort    int // server-side port for back audio RTCP
-	videoRTPChannel      byte
-	videoRTCPChannel     byte
-	audioRTPChannel      byte
-	audioRTCPChannel     byte
-	backAudioRTPChannel  byte
-	backAudioRTCPChannel byte
-	setupCount           int
-}
-
 type CameraStream struct {
 	camera       *storage.CameraInfo
 	resolution   string
@@ -99,7 +77,7 @@ func (s *RTSPServer) Start() error {
 		return errors.New("server is already running")
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", s.port))
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %d: %v", s.port, err)
 	}
@@ -222,6 +200,10 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
+	// Get client IP address
+	clientIP := conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	core.Logger.Info().Msgf("Client IP: %s", clientIP)
+
 	// Parse initial RTSP request
 	request, err := s.parseRTSPRequestFromReader(reader)
 	if err != nil {
@@ -268,6 +250,7 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 		session:             session,
 		cameraPath:          cameraPath,
 		stream:              stream,
+		clientIP:           clientIP,
 		transportMode:       TransportUDP, // Default to UDP
 		videoRTPPort:        0,
 		audioRTPPort:        0,

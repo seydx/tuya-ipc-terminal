@@ -36,6 +36,29 @@ type RTSPResponse struct {
 	Body       string
 }
 
+type RTSPClient struct {
+	conn                 net.Conn
+	session              string
+	cameraPath           string
+	stream               *CameraStream
+	reader               *bufio.Reader
+	transportMode        TransportMode
+	clientIP            string  // Add client IP field
+	videoRTPPort         int
+	videoRTCPPort        int
+	audioRTPPort         int
+	audioRTCPPort        int
+	backAudioRTPPort     int // server-side port for back audio
+	backAudioRTCPPort    int // server-side port for back audio RTCP
+	videoRTPChannel      byte
+	videoRTCPChannel     byte
+	audioRTPChannel      byte
+	audioRTCPChannel     byte
+	backAudioRTPChannel  byte
+	backAudioRTCPChannel byte
+	setupCount           int
+}
+
 func sendRTSPResponse(conn net.Conn, statusCode int, status string, headers map[string]string, body string) error {
 	var response strings.Builder
 
@@ -445,7 +468,7 @@ func (s *RTSPServer) handleSetup(client *RTSPClient, request *RTSPRequest) {
 		// Add/update UDP client with current ports after video and audio setup
 		if isVideoTrack || isAudioTrack {
 			err := client.stream.webrtcBridge.rtpForwarder.AddUDPClient(client.session,
-				client.videoRTPPort, client.audioRTPPort)
+				client.clientIP, client.videoRTPPort, client.audioRTPPort)
 			if err != nil {
 				core.Logger.Error().Err(err).Msg("Error adding UDP RTP client")
 				sendRTSPResponse(client.conn, 500, "Internal Server Error", nil,
