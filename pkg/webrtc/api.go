@@ -213,6 +213,7 @@ func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
 			RTPCodecCapability: webrtc.RTPCodecCapability{
 				MimeType:     webrtc.MimeTypeH265,
 				ClockRate:    90000,
+				SDPFmtpLine:  "profile-id=1;level-asymmetry-allowed=1;packetization-mode=1",
 				RTCPFeedback: videoRTCPFeedback,
 			},
 			PayloadType: 100,

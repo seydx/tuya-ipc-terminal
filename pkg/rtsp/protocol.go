@@ -549,9 +549,18 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 		if videoInfo != nil {
 			if isHEVC {
 				// H.265/HEVC
-				videoSdp += "m=video 0 RTP/AVP 96\r\n"
-				videoSdp += "a=rtpmap:96 H265/90000\r\n"
-				videoSdp += "a=fmtp:96 profile-id=1\r\n"
+				videoSdp += "m=video 0 RTP/AVP 100\r\n"
+				videoSdp += "a=rtpmap:100 H265/90000\r\n"
+				// Add width and height
+				videoSdp += fmt.Sprintf("a=imageattr:100 send [x=%d,y=%d] recv [x=%d,y=%d]\r\n",
+					videoInfo.Width, videoInfo.Height, videoInfo.Width, videoInfo.Height)
+				// Add more detailed fmtp line with profile and level
+				videoSdp += "a=fmtp:100 profile-id=1;level-asymmetry-allowed=1;packetization-mode=1;tier-flag=0;level-id=120\r\n"
+				// Add sprop-vps, sprop-sps, sprop-pps if available
+				if videoInfo.ProfileId != "" {
+					videoSdp += fmt.Sprintf("a=fmtp:100 sprop-vps=%s;sprop-sps=%s;sprop-pps=%s\r\n",
+						videoInfo.ProfileId, videoInfo.ProfileId, videoInfo.ProfileId)
+				}
 			} else {
 				// H.264
 				videoSdp += "m=video 0 RTP/AVP 96\r\n"

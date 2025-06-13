@@ -1,5 +1,9 @@
 package tuya
 
+import (
+	"tuya-ipc-terminal/pkg/core"
+)
+
 func GetStreamType(skill *Skill, streamResolution string) int {
 	// Default streamType if nothing is found
 	defaultStreamType := 1
@@ -44,6 +48,7 @@ func GetStreamType(skill *Skill, streamResolution string) int {
 func IsHEVC(skill *Skill, streamType int) bool {
 	for _, video := range skill.Videos {
 		if video.StreamType == streamType {
+			core.Logger.Info().Msgf("Checking video stream - StreamType: %d, CodecType: %d", video.StreamType, video.CodecType)
 			return video.CodecType == 4
 		}
 	}
