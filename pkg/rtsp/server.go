@@ -16,6 +16,7 @@ import (
 )
 
 type RTSPServer struct {
+	address        string
 	port           int
 	listener       net.Listener
 	storageManager *storage.StorageManager
@@ -77,10 +78,11 @@ type ServerConfig struct {
 	EnableAuthentication bool
 }
 
-func NewRTSPServer(port int, storageManager *storage.StorageManager) *RTSPServer {
+func NewRTSPServer(address string, port int, storageManager *storage.StorageManager) *RTSPServer {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &RTSPServer{
+		address:         address,
 		port:           port,
 		storageManager: storageManager,
 		clients:        make(map[string]*RTSPClient),
@@ -99,7 +101,7 @@ func (s *RTSPServer) Start() error {
 		return errors.New("server is already running")
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.address, s.port))
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %d: %v", s.port, err)
 	}
@@ -401,7 +403,7 @@ func (s *RTSPServer) printAvailableEndpoints() error {
 		json.Unmarshal([]byte(camera.Skill), &skill)
 
 		supportClarity := skill != nil && (skill.WebRTC&(1<<5)) != 0
-		baseUrl := fmt.Sprintf("rtsp://localhost:%d%s", s.port, camera.RTSPPath)
+		baseUrl := fmt.Sprintf("rtsp://%s:%d%s", s.address, s.port, camera.RTSPPath)
 
 		if supportClarity {
 			core.Logger.Info().Msgf("  %s/hd (%s)", baseUrl, camera.DeviceName)
