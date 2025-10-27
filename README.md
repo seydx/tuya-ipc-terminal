@@ -222,6 +222,71 @@ sudo systemctl start tuya-rtsp
 ./tuya-ipc-terminal cameras list
 ```
 
+
+
+### 🐋 Running as a Docker container
+
+First, lets build the image:
+```
+docker build -t tuya_ipc:latest
+```
+For the initial setup, run an interactive setup on a temporary container for creating the authentication files (replace with your region/email):
+
+```
+docker run --rm -it -v ./tuya_data:/app/.tuya_data tuya_ipc:latest ./tuya-ipc-terminal auth add eu-central user@example.com
+```
+
+Then execute the following command to have a lasting container:
+
+```
+docker run --name tuya_ipc --restart unless-stopped -p 8554:8554 -u 1000:1000 -v /etc/localtime:/etc/localtime:ro -v ./tuya_data:/app/.tuya-data:rw tuya_ipc:latest
+```
+
+Done. You can access the streams at:
+
+```
+rtsp://localhost:8554/[camera-name]
+rtsp://localhost:8554/[camera-name]/sd  # Sub-stream (lower quality)
+```
+
+### 📦 Running with Docker Compose
+
+For the initial setup, run an interactive setup on a temporary container for creating the authentication files (replace with your region/email) same as the setup for normal docker:
+```
+docker build -t tuya_ipc:latest && docker run --rm -it -v ./tuya_data:/app/.tuya_data tuya_ipc:latest ./tuya-ipc-terminal auth add eu-central user@example.com
+```
+Then add the compose.yml file:
+```
+services:
+  tuya_ipc:
+    container_name: tuya_ipc
+    build: .
+    image: tuya_ipc:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./tuya_data:/app/.tuya-data:rw
+```
+
+Now just issue
+
+```
+docker compose up -d
+```
+And done. You can access the streams at:
+
+```
+rtsp://localhost:8554/[camera-name]
+rtsp://localhost:8554/[camera-name]/sd  # Sub-stream (lower quality)
+```
+
+#### 🕐 Auto refreshing password auth with 🐋 Docker
+
+The script located at [refresh_auth_token.sh](./scripts/refresh_auth_token.sh) can be used with a cron job to refresh your auth session automatically if you use the password login method.
+
+Make sure to edit the [.env](.scripts/.env) file to use your credentials so it refreshes the correct account.
+
 ## 🔄 Data Flow
 
 1. **Authentication** → Tuya Cloud API
