@@ -269,6 +269,8 @@ func (s *RTSPServer) handleRTSPMethod(client *RTSPClient, request *RTSPRequest) 
 	case "TEARDOWN":
 		s.handleTeardown(client, request)
 		close = true
+	case "PAUSE":
+		s.handlePause(client, request)
 	default:
 		s.handleUnsupportedMethod(client, request)
 	}
@@ -279,7 +281,7 @@ func (s *RTSPServer) handleRTSPMethod(client *RTSPClient, request *RTSPRequest) 
 func (s *RTSPServer) handleOptions(client *RTSPClient, request *RTSPRequest) {
 	headers := map[string]string{
 		"CSeq":   strconv.Itoa(request.CSeq),
-		"Public": "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN",
+		"Public": "OPTIONS, DESCRIBE, SETUP, PLAY, PAUSE, TEARDOWN",
 	}
 
 	sendRTSPResponse(client.conn, 200, "OK", headers, "")
@@ -287,7 +289,8 @@ func (s *RTSPServer) handleOptions(client *RTSPClient, request *RTSPRequest) {
 
 func (s *RTSPServer) handleDescribe(client *RTSPClient, request *RTSPRequest) {
 	// Generate SDP for the camera stream
-	sdp := s.generateSDP(client.stream.camera, request.URL)
+	_, resolution := extractCameraPath(request.URL)
+	sdp := s.generateSDP(client.stream.camera, request.URL, resolution)
 
 	headers := map[string]string{
 		"CSeq":          strconv.Itoa(request.CSeq),
@@ -505,6 +508,15 @@ func (s *RTSPServer) handleTeardown(client *RTSPClient, request *RTSPRequest) {
 	core.Logger.Info().Msgf("Tearing down RTSP stream for client %s", client.session)
 }
 
+func (s *RTSPServer) handlePause(client *RTSPClient, request *RTSPRequest) {
+	headers := map[string]string{
+		"CSeq":    strconv.Itoa(request.CSeq),
+		"Session": client.session,
+	}
+
+	sendRTSPResponse(client.conn, 200, "OK", headers, "")
+}
+
 func (s *RTSPServer) handleUnsupportedMethod(client *RTSPClient, request *RTSPRequest) {
 	headers := map[string]string{
 		"CSeq": strconv.Itoa(request.CSeq),
@@ -513,7 +525,7 @@ func (s *RTSPServer) handleUnsupportedMethod(client *RTSPClient, request *RTSPRe
 	sendRTSPResponse(client.conn, 501, "Not Implemented", headers, "")
 }
 
-func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) string {
+func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string, resolution string) string {
 	sdp := "v=0\r\n"
 	sdp += fmt.Sprintf("o=- %d %d IN IP4 0.0.0.0\r\n", time.Now().Unix(), time.Now().Unix())
 	sdp += "s=Tuya Camera Stream\r\n"
@@ -535,7 +547,10 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 	// Video media description based on skill
 	if skill != nil && len(skill.Videos) > 0 {
 		// HD (main) as default
-		streamType := tuya.GetStreamType(skill, "hd")
+		if resolution == "" {
+			resolution = "hd"
+		}
+		streamType := tuya.GetStreamType(skill, resolution)
 		isHEVC := tuya.IsHEVC(skill, streamType)
 
 		var videoInfo *tuya.VideoSkill
