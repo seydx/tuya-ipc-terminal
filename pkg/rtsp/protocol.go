@@ -287,7 +287,7 @@ func (s *RTSPServer) handleOptions(client *RTSPClient, request *RTSPRequest) {
 
 func (s *RTSPServer) handleDescribe(client *RTSPClient, request *RTSPRequest) {
 	// Generate SDP for the camera stream
-	sdp := s.generateSDP(client.stream.camera, request.URL)
+	sdp := s.generateSDP(client.stream.camera, client.stream.resolution, request.URL)
 
 	headers := map[string]string{
 		"CSeq":          strconv.Itoa(request.CSeq),
@@ -513,7 +513,7 @@ func (s *RTSPServer) handleUnsupportedMethod(client *RTSPClient, request *RTSPRe
 	sendRTSPResponse(client.conn, 501, "Not Implemented", headers, "")
 }
 
-func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) string {
+func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, resolution string, baseURL string) string {
 	sdp := "v=0\r\n"
 	sdp += fmt.Sprintf("o=- %d %d IN IP4 0.0.0.0\r\n", time.Now().Unix(), time.Now().Unix())
 	sdp += "s=Tuya Camera Stream\r\n"
@@ -534,8 +534,7 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 
 	// Video media description based on skill
 	if skill != nil && len(skill.Videos) > 0 {
-		// HD (main) as default
-		streamType := tuya.GetStreamType(skill, "hd")
+		streamType := tuya.GetStreamType(skill, resolution)
 		isHEVC := tuya.IsHEVC(skill, streamType)
 
 		var videoInfo *tuya.VideoSkill
@@ -552,11 +551,13 @@ func (s *RTSPServer) generateSDP(camera *storage.CameraInfo, baseURL string) str
 				videoSdp += "m=video 0 RTP/AVP 96\r\n"
 				videoSdp += "a=rtpmap:96 H265/90000\r\n"
 				videoSdp += "a=fmtp:96 profile-id=1\r\n"
+				videoSdp += fmt.Sprintf("a=framesize:96 %d-%d\r\n", videoInfo.Width, videoInfo.Height)
 			} else {
 				// H.264
 				videoSdp += "m=video 0 RTP/AVP 96\r\n"
 				videoSdp += "a=rtpmap:96 H264/90000\r\n"
 				videoSdp += "a=fmtp:96 packetization-mode=1;profile-level-id=42001e\r\n"
+				videoSdp += fmt.Sprintf("a=framesize:96 %d-%d\r\n", videoInfo.Width, videoInfo.Height)
 			}
 		}
 	} else {

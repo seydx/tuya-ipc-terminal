@@ -259,20 +259,28 @@ func (rf *RTPForwarder) RemoveClient(sessionID string) {
 	}
 }
 
+func isDeadClientError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "connection reset by peer")
+}
+
 func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 	rf.mutex.RLock()
-	defer rf.mutex.RUnlock()
 
 	if len(rf.clients) == 0 {
+		rf.mutex.RUnlock()
 		return
 	}
 
 	// Serialize packet
 	data, err := packet.Marshal()
 	if err != nil {
+		rf.mutex.RUnlock()
 		core.Logger.Error().Err(err).Msg("Error marshaling video RTP packet")
 		return
 	}
+
+	var deadClients []string
 
 	// Forward to all clients
 	for sessionID, client := range rf.clients {
@@ -281,7 +289,11 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 		if client.transportMode == TransportUDP {
 			if client.videoConn != nil {
 				if _, err := client.videoConn.Write(data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to UDP client %s", sessionID)
+					if isDeadClientError(err) {
+						deadClients = append(deadClients, sessionID)
+					} else {
+						core.Logger.Error().Err(err).Msgf("Error forwarding video packet to UDP client %s", sessionID)
+					}
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first video packet to UDP client %s on port %d",
@@ -291,7 +303,11 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 		} else if client.transportMode == TransportTCP {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.videoRTPChannel, data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to TCP client %s", sessionID)
+					if isDeadClientError(err) {
+						deadClients = append(deadClients, sessionID)
+					} else {
+						core.Logger.Error().Err(err).Msgf("Error forwarding video packet to TCP client %s", sessionID)
+					}
 				} else if rf.firstVideoPacket {
 					rf.firstVideoPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first video packet to TCP client %s on channel %d",
@@ -300,22 +316,32 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 			}
 		}
 	}
+
+	rf.mutex.RUnlock()
+
+	for _, id := range deadClients {
+		core.Logger.Debug().Msgf("Removing dead video client %s (connection error)", id)
+		rf.RemoveClient(id)
+	}
 }
 
 func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 	rf.mutex.RLock()
-	defer rf.mutex.RUnlock()
 
 	if len(rf.clients) == 0 {
+		rf.mutex.RUnlock()
 		return
 	}
 
 	// Serialize packet
 	data, err := packet.Marshal()
 	if err != nil {
+		rf.mutex.RUnlock()
 		core.Logger.Error().Err(err).Msg("Error marshaling audio RTP packet")
 		return
 	}
+
+	var deadClients []string
 
 	// Forward to all clients
 	for sessionID, client := range rf.clients {
@@ -324,7 +350,11 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 		if client.transportMode == TransportUDP {
 			if client.audioConn != nil {
 				if _, err := client.audioConn.Write(data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to UDP client %s", sessionID)
+					if isDeadClientError(err) {
+						deadClients = append(deadClients, sessionID)
+					} else {
+						core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to UDP client %s", sessionID)
+					}
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to UDP client %s on port %d",
@@ -334,7 +364,11 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 		} else if client.transportMode == TransportTCP {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.audioRTPChannel, data); err != nil {
-					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to TCP client %s", sessionID)
+					if isDeadClientError(err) {
+						deadClients = append(deadClients, sessionID)
+					} else {
+						core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to TCP client %s", sessionID)
+					}
 				} else if rf.firstAudioPacket {
 					rf.firstAudioPacket = false
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to TCP client %s on channel %d",
@@ -342,6 +376,13 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 				}
 			}
 		}
+	}
+
+	rf.mutex.RUnlock()
+
+	for _, id := range deadClients {
+		core.Logger.Debug().Msgf("Removing dead audio client %s (connection error)", id)
+		rf.RemoveClient(id)
 	}
 }
 

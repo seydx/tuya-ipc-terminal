@@ -57,6 +57,7 @@ type CameraStream struct {
 	clients      map[string]*RTSPClient
 	mutex        sync.RWMutex
 	connecting   bool
+	starting     bool // true while a startStream goroutine is executing
 	active       bool
 	lastActivity time.Time
 
@@ -430,16 +431,37 @@ func (s *RTSPServer) cleanupRoutine() {
 
 func (s *RTSPServer) cleanupInactiveStreams() {
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
 
 	now := time.Now()
+	var toStop []*CameraStream
+	var toDelete []string
+
 	for deviceID, stream := range s.streams {
-		// Remove streams inactive for more than 5 minutes
-		if now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0 {
+		// Read stream.clients under stream.mutex to avoid a data race with
+		// concurrent AddClient/RemoveClient calls (s.mutex → stream.mutex
+		// ordering is consistent with removeClient).
+		stream.mutex.RLock()
+		clientCount := len(stream.clients)
+		stream.mutex.RUnlock()
+
+		// Collect streams inactive for more than 5 minutes with no clients
+		if now.Sub(stream.lastActivity) > 5*time.Minute && clientCount == 0 {
 			core.Logger.Trace().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
-			stream.Stop()
-			delete(s.streams, deviceID)
+			toStop = append(toStop, stream)
+			toDelete = append(toDelete, deviceID)
 		}
+	}
+
+	// Remove from map while still holding the lock, then release before
+	// calling stream.Stop() which performs slow WebRTC teardown.
+	for _, deviceID := range toDelete {
+		delete(s.streams, deviceID)
+	}
+
+	s.mutex.Unlock()
+
+	for _, stream := range toStop {
+		stream.Stop()
 	}
 }
 
@@ -506,8 +528,16 @@ func (cs *CameraStream) SetShutdownDelay(delay time.Duration) {
 }
 
 func (cs *CameraStream) Stop() {
-	// Clear all clients first
+	// Snapshot client IDs under lock to avoid concurrent map iteration/write
+	// panic if AddClient/RemoveClient is called while we iterate.
+	cs.mutex.RLock()
+	sessionIDs := make([]string, 0, len(cs.clients))
 	for sessionID := range cs.clients {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	cs.mutex.RUnlock()
+
+	for _, sessionID := range sessionIDs {
 		cs.RemoveClient(sessionID)
 	}
 
@@ -517,22 +547,37 @@ func (cs *CameraStream) Stop() {
 
 func (cs *CameraStream) startStream() {
 	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
 
-	if cs.active {
+	// Guard against concurrent startStream goroutines (multiple AddClient
+	// calls arriving while the bridge is coming up) and against re-entry
+	// after the stream is already active.
+	if cs.active || cs.starting {
+		cs.mutex.Unlock()
 		return
 	}
+	cs.starting = true
 
 	core.Logger.Info().Msgf("Starting stream for camera: %s", cs.camera.DeviceName)
 
+	// Release lock before the slow Tuya cloud connection so that concurrent
+	// AddClient() calls (which also acquire cs.mutex) are not blocked while
+	// we wait for the WebRTC bridge to come up.
+	cs.mutex.Unlock()
+
 	if err := cs.webrtcBridge.Start(); err != nil {
 		core.Logger.Error().Err(err).Msg("Failed to start WebRTC bridge")
+		cs.mutex.Lock()
+		cs.starting = false
 		cs.stopStreamInternal()
+		cs.mutex.Unlock()
 		return
 	}
 
+	cs.mutex.Lock()
+	cs.starting = false
 	cs.connecting = false
 	cs.active = true
+	cs.mutex.Unlock()
 }
 
 func (cs *CameraStream) stopStream() {
