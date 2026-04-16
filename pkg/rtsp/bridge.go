@@ -308,8 +308,10 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 		if state == pion.PeerConnectionStateConnected {
 			core.Logger.Info().Msgf("WebRTC connection established")
 
-			if !wb.isHEVC && wb.resolution == "hd" {
-				_ = wb.cameraClient.SendResolution(0)
+			if !wb.isHEVC {
+				if wb.resolution == "hd" {
+					_ = wb.cameraClient.SendResolution(0)
+				}
 				wb.waiter.Done(nil)
 			}
 		}
