@@ -455,18 +455,8 @@ func (rf *RTPForwarder) handleUDPBackchannelRTCP(listener *net.UDPConn) {
 
 func (rf *RTPForwarder) sendInterleavedRTP(conn net.Conn, channel byte, rtpData []byte) error {
 	// Interleaved format: $ + channel + length(2 bytes) + RTP data
-	header := make([]byte, 4)
-	header[0] = '$'                     // Magic byte
-	header[1] = channel                 // Channel number
-	header[2] = byte(len(rtpData) >> 8) // Length high byte
-	header[3] = byte(len(rtpData))      // Length low byte
-
-	// Send header + data in one write to avoid fragmentation
-	fullPacket := append(header, rtpData...)
-
-	if _, err := conn.Write(fullPacket); err != nil {
-		return err
-	}
-
-	return nil
+	header := [4]byte{'$', channel, byte(len(rtpData) >> 8), byte(len(rtpData))}
+	bufs := net.Buffers{header[:], rtpData}
+	_, err := bufs.WriteTo(conn)
+	return err
 }
