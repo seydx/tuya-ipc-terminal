@@ -347,11 +347,25 @@ func (rf *RTPForwarder) Stop() {
 	rf.videoFirstLogged.Store(false)
 	rf.audioFirstLogged.Store(false)
 
-	// Clear all clients
-	for sessionID := range rf.clients {
-		rf.RemoveClient(sessionID)
+	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
+	for _, client := range rf.clients {
+		if client.transportMode == TransportUDP {
+			if client.videoConn != nil {
+				client.videoConn.Close()
+			}
+			if client.audioConn != nil {
+				client.audioConn.Close()
+			}
+			if client.backchannelListener != nil {
+				client.backchannelListener.Close()
+			}
+			if client.backchannelRTCPListener != nil {
+				client.backchannelRTCPListener.Close()
+			}
+		}
 	}
-
+	rf.clients = make(map[string]*RTPClient)
 	core.Logger.Trace().Msg("RTPForwarder stopped and all clients cleared")
 }
 
