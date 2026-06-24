@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/utils"
@@ -24,13 +25,13 @@ type RTPForwarder struct {
 	clients map[string]*RTPClient
 	mutex   sync.RWMutex
 
-	// RTP session info
-	videoSSRC uint32
-	audioSSRC uint32
+	// RTP session info — accessed atomically
+	videoSSRC atomic.Uint32
+	audioSSRC atomic.Uint32
 
-	// Packet count
-	firstVideoPacket bool
-	firstAudioPacket bool
+	// true once the first packet has been logged — accessed atomically
+	videoFirstLogged atomic.Bool
+	audioFirstLogged atomic.Bool
 
 	OnBackchannelAudio func(*rtp.Packet)
 }
@@ -68,13 +69,11 @@ type RTPClient struct {
 }
 
 func NewRTPForwarder() *RTPForwarder {
-	return &RTPForwarder{
-		clients:          make(map[string]*RTPClient),
-		videoSSRC:        0, // Default SSRC for video
-		audioSSRC:        1, // Default SSRC for audio
-		firstVideoPacket: true,
-		firstAudioPacket: true,
+	rf := &RTPForwarder{
+		clients: make(map[string]*RTPClient),
 	}
+	rf.audioSSRC.Store(1)
+	return rf
 }
 
 func (rf *RTPForwarder) AddUDPClient(sessionID string, videoRTPPort, audioRTPPort int) error {
@@ -282,8 +281,7 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 			if client.videoConn != nil {
 				if _, err := client.videoConn.Write(data); err != nil {
 					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to UDP client %s", sessionID)
-				} else if rf.firstVideoPacket {
-					rf.firstVideoPacket = false
+				} else if !rf.videoFirstLogged.Swap(true) {
 					core.Logger.Trace().Msgf("Successfully sent first video packet to UDP client %s on port %d",
 						sessionID, client.videoRTPPort)
 				}
@@ -292,8 +290,7 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.videoRTPChannel, data); err != nil {
 					core.Logger.Error().Err(err).Msgf("Error forwarding video packet to TCP client %s", sessionID)
-				} else if rf.firstVideoPacket {
-					rf.firstVideoPacket = false
+				} else if !rf.videoFirstLogged.Swap(true) {
 					core.Logger.Trace().Msgf("Successfully sent first video packet to TCP client %s on channel %d",
 						sessionID, client.videoRTPChannel)
 				}
@@ -325,8 +322,7 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 			if client.audioConn != nil {
 				if _, err := client.audioConn.Write(data); err != nil {
 					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to UDP client %s", sessionID)
-				} else if rf.firstAudioPacket {
-					rf.firstAudioPacket = false
+				} else if !rf.audioFirstLogged.Swap(true) {
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to UDP client %s on port %d",
 						sessionID, client.audioRTPPort)
 				}
@@ -335,8 +331,7 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 			if client.tcpConn != nil {
 				if err := rf.sendInterleavedRTP(client.tcpConn, client.audioRTPChannel, data); err != nil {
 					core.Logger.Error().Err(err).Msgf("Error forwarding audio packet to TCP client %s", sessionID)
-				} else if rf.firstAudioPacket {
-					rf.firstAudioPacket = false
+				} else if !rf.audioFirstLogged.Swap(true) {
 					core.Logger.Trace().Msgf("Successfully sent first audio packet to TCP client %s on channel %d",
 						sessionID, client.audioRTPChannel)
 				}
@@ -347,12 +342,10 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 
 func (rf *RTPForwarder) Stop() {
 	// Reset SSRCs
-	rf.videoSSRC = 0
-	rf.audioSSRC = 1
-
-	// Reset first packet flags
-	rf.firstVideoPacket = true
-	rf.firstAudioPacket = true
+	rf.videoSSRC.Store(0)
+	rf.audioSSRC.Store(1)
+	rf.videoFirstLogged.Store(false)
+	rf.audioFirstLogged.Store(false)
 
 	// Clear all clients
 	for sessionID := range rf.clients {

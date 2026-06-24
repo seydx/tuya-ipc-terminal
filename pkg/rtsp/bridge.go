@@ -271,9 +271,9 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 				}
 
 				switch packet.SSRC {
-				case wb.rtpForwarder.videoSSRC:
+				case wb.rtpForwarder.videoSSRC.Load():
 					wb.rtpForwarder.ForwardVideoPacket(packet)
-				case wb.rtpForwarder.audioSSRC:
+				case wb.rtpForwarder.audioSSRC.Load():
 					wb.rtpForwarder.ForwardAudioPacket(packet)
 				}
 			}
@@ -572,8 +572,8 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 			return false, err
 		}
 
-		wb.rtpForwarder.videoSSRC = recvMessage.Video.SSRC
-		wb.rtpForwarder.audioSSRC = recvMessage.Audio.SSRC
+		wb.rtpForwarder.videoSSRC.Store(recvMessage.Video.SSRC)
+		wb.rtpForwarder.audioSSRC.Store(recvMessage.Audio.SSRC)
 
 		completeMsg, _ := json.Marshal(tuya.DataChannelMessage{
 			Type: "complete",
