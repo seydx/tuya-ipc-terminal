@@ -506,12 +506,17 @@ func (cs *CameraStream) SetShutdownDelay(delay time.Duration) {
 }
 
 func (cs *CameraStream) Stop() {
-	// Clear all clients first
-	for sessionID := range cs.clients {
-		cs.RemoveClient(sessionID)
+	cs.mutex.Lock()
+	sessions := make([]string, 0, len(cs.clients))
+	for id := range cs.clients {
+		sessions = append(sessions, id)
+	}
+	cs.mutex.Unlock()
+
+	for _, id := range sessions {
+		cs.RemoveClient(id)
 	}
 
-	// Stop the stream
 	cs.stopStream()
 }
 

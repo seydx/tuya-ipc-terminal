@@ -31,6 +31,7 @@ type WebRTCBridge struct {
 	resolution     string
 	streamType     int
 	isHEVC         bool
+	hevcCodecStr   string // e.g. "hev1.1.2.L150.90" from DataChannel "codec" message
 	user           *storage.UserSession
 	storageManager *storage.StorageManager
 
@@ -256,6 +257,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 			Ordered:        &ordered,
 		})
 
+		var dcBinaryLogged bool
 		wb.dataChannel.OnMessage(func(msg pion.DataChannelMessage) {
 			if msg.IsString {
 				if connected, err := wb.probe(msg); err != nil {
@@ -264,17 +266,32 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 					wb.waiter.Done(nil)
 				}
 			} else {
+				if !dcBinaryLogged {
+					dcBinaryLogged = true
+					n := len(msg.Data)
+					if n > 32 {
+						n = 32
+					}
+					core.Logger.Debug().Msgf("DataChannel first binary msg len=%d header=%x", len(msg.Data), msg.Data[:n])
+				}
+
 				packet := &rtp.Packet{}
 				if err := packet.Unmarshal(msg.Data); err != nil {
-					// skip
+					core.Logger.Debug().Err(err).Msgf("DataChannel binary unmarshal failed (len=%d)", len(msg.Data))
 					return
 				}
 
 				switch packet.SSRC {
-				case wb.rtpForwarder.videoSSRC:
+				case wb.rtpForwarder.videoSSRC.Load():
+					// Camera sends HEVC RTP with its own PT (e.g. 95); rewrite to
+					// match our SDP declaration of PT=96 so decoders accept it.
+					packet.PayloadType = 96
 					wb.rtpForwarder.ForwardVideoPacket(packet)
-				case wb.rtpForwarder.audioSSRC:
+				case wb.rtpForwarder.audioSSRC.Load():
 					wb.rtpForwarder.ForwardAudioPacket(packet)
+				default:
+					core.Logger.Debug().Msgf("DataChannel packet SSRC=%d unknown (video=%d audio=%d)",
+						packet.SSRC, wb.rtpForwarder.videoSSRC.Load(), wb.rtpForwarder.audioSSRC.Load())
 				}
 			}
 		})
@@ -556,6 +573,9 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 
 	switch message.Type {
 	case "codec":
+		core.Logger.Debug().Msgf("DataChannel codec msg: %s", message.Msg)
+		wb.hevcCodecStr = message.Msg
+
 		frameRequest, _ := json.Marshal(tuya.DataChannelMessage{
 			Type: "start",
 			Msg:  "frame",
@@ -572,8 +592,11 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 			return false, err
 		}
 
-		wb.rtpForwarder.videoSSRC = recvMessage.Video.SSRC
-		wb.rtpForwarder.audioSSRC = recvMessage.Audio.SSRC
+		core.Logger.Debug().Msgf("DataChannel recv msg: videoSSRC=%d audioSSRC=%d raw=%s",
+			recvMessage.Video.SSRC, recvMessage.Audio.SSRC, message.Msg)
+
+		wb.rtpForwarder.videoSSRC.Store(recvMessage.Video.SSRC)
+		wb.rtpForwarder.audioSSRC.Store(recvMessage.Audio.SSRC)
 
 		completeMsg, _ := json.Marshal(tuya.DataChannelMessage{
 			Type: "complete",

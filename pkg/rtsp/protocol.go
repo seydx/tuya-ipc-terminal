@@ -482,6 +482,30 @@ func (s *RTSPServer) handlePlay(client *RTSPClient, request *RTSPRequest) {
 		return
 	}
 
+	// Wait for WebRTC to connect before acknowledging PLAY, so the first
+	// VPS/SPS/PPS keyframe packets are already in-flight when FFmpeg starts
+	// reading. Without this wait, FFmpeg probes with analyzeduration=0 and
+	// reports "unspecified size" because no RTP packets have arrived yet.
+	if stream := client.stream; stream != nil {
+		deadline := time.Now().Add(20 * time.Second)
+		for time.Now().Before(deadline) {
+			stream.mutex.RLock()
+			active := stream.active
+			connecting := stream.connecting
+			stream.mutex.RUnlock()
+
+			if active {
+				break
+			}
+			if !connecting {
+				sendRTSPResponse(client.conn, 503, "Service Unavailable",
+					map[string]string{"CSeq": strconv.Itoa(request.CSeq)}, "")
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
 	headers := map[string]string{
 		"CSeq":     strconv.Itoa(request.CSeq),
 		"Session":  client.session,
