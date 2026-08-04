@@ -250,7 +250,7 @@ func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, er
 			for _, room := range roomList.Result {
 				for _, device := range room.DeviceList {
 					// Check if device is a camera (sp = smart camera, dghsxj = another camera type)
-					if (device.Category == "sp" || device.Category == "dghsxj") && !containsDevice(devices, device.DeviceId) {
+					if (device.Category == "sp" || device.Category == "dghsxj" || device.Category == "cdsxj") && !containsDevice(devices, device.DeviceId) {
 						devices = append(devices, device)
 					}
 				}
@@ -266,7 +266,7 @@ func discoverCamerasForUser(user *storage.UserSession) ([]storage.CameraInfo, er
 		for _, sharedHome := range sharedHomes.Result.SecurityWebCShareInfoList {
 			for _, device := range sharedHome.DeviceInfoList {
 				// Check if device is a camera (sp = smart camera, dghsxj = another camera type)
-				if (device.Category == "sp" || device.Category == "dghsxj") && !containsDevice(devices, device.DeviceId) {
+				if (device.Category == "sp" || device.Category == "dghsxj" || device.Category == "cdsxj") && !containsDevice(devices, device.DeviceId) {
 					devices = append(devices, device)
 				}
 			}
