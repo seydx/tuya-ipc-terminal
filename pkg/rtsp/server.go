@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,7 @@ type CameraStream struct {
 	clients      map[string]*RTSPClient
 	mutex        sync.RWMutex
 	connecting   bool
+	starting     bool
 	active       bool
 	lastActivity time.Time
 
@@ -172,9 +174,11 @@ func (s *RTSPServer) GetStats() ServerStats {
 
 	activeStreams := 0
 	for _, stream := range s.streams {
+		stream.mutex.RLock()
 		if stream.active {
 			activeStreams++
 		}
+		stream.mutex.RUnlock()
 	}
 
 	return ServerStats{
@@ -295,24 +299,36 @@ func (s *RTSPServer) findCamera(path string) (*storage.CameraInfo, *storage.User
 		return nil, nil, err
 	}
 
-	// Find camera by RTSP path
-	for _, camera := range cameras {
-		if camera.RTSPPath == path {
-			// Get user for this camera
-			users, err := s.storageManager.ListUsers()
-			if err != nil {
-				continue
-			}
+	camera := findCameraByRTSPPath(cameras, path)
+	if camera == nil {
+		return nil, nil, nil
+	}
 
-			for _, user := range users {
-				if user.UserKey == camera.UserKey {
-					return &camera, &user, nil
-				}
-			}
+	users, err := s.storageManager.ListUsers()
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range users {
+		if users[i].UserKey == camera.UserKey {
+			return camera, &users[i], nil
 		}
 	}
 
 	return nil, nil, nil
+}
+
+func findCameraByRTSPPath(cameras []storage.CameraInfo, path string) *storage.CameraInfo {
+	for i := range cameras {
+		if cameras[i].RTSPPath == path {
+			return &cameras[i]
+		}
+	}
+	for i := range cameras {
+		if strings.EqualFold(cameras[i].RTSPPath, path) {
+			return &cameras[i]
+		}
+	}
+	return nil
 }
 
 func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolution string, user *storage.UserSession) (*CameraStream, error) {
@@ -322,27 +338,32 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 	// Check if stream already exists
 	streamId := fmt.Sprintf("%s-%s", camera.DeviceID, streamResolution)
 	if stream, exists := s.streams[streamId]; exists {
-		if stream.active || stream.connecting {
-			core.Logger.Trace().Msgf("Reusing existing stream for camera: %s", camera.DeviceName)
+		stream.mutex.Lock()
+		reusable := stream.active || stream.connecting || stream.starting
+		if reusable {
 			stream.lastActivity = time.Now()
+		}
+		stream.mutex.Unlock()
+		if reusable {
+			core.Logger.Trace().Msgf("Reusing existing stream for camera: %s", camera.DeviceName)
 			return stream, nil
 		}
 	}
 
 	// Create new stream
 	stream := NewCameraStream(camera, streamResolution, user, s.storageManager, s)
+	stream.mutex.Lock()
 	stream.connecting = true
+	stream.mutex.Unlock()
 
 	stream.webrtcBridge.OnError = func(err error) {
+		stream.mutex.Lock()
+		defer stream.mutex.Unlock()
+
 		if stream.active || stream.connecting {
 			core.Logger.Error().Err(err).Msgf("WebRTC error for camera %s", camera.DeviceName)
 
-			// Only stop if no clients are connected
-			stream.mutex.Lock()
-			clientCount := len(stream.clients)
-			stream.mutex.Unlock()
-
-			if clientCount == 0 {
+			if len(stream.clients) == 0 {
 				stream.stopStreamInternal()
 			}
 		}
@@ -354,11 +375,11 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 	return stream, nil
 }
 
-func (s *RTSPServer) removeStream(streamId string) {
+func (s *RTSPServer) removeStream(streamId string, stream *CameraStream) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if _, exists := s.streams[streamId]; exists {
+	if current, exists := s.streams[streamId]; exists && current == stream {
 		delete(s.streams, streamId)
 		core.Logger.Trace().Msgf("Removed stream %s from server map", streamId)
 	}
@@ -372,16 +393,18 @@ func (s *RTSPServer) addClient(client *RTSPClient) {
 
 func (s *RTSPServer) removeClient(sessionID string) {
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	client, exists := s.clients[sessionID]
+	if exists {
+		delete(s.clients, sessionID)
+	}
+	s.mutex.Unlock()
 
-	if client, exists := s.clients[sessionID]; exists {
-		// Remove client from stream
+	if exists {
+		// Stream cleanup can wait for a camera startup; do not hold the server lock.
+		client.conn.Close()
 		if client.stream != nil {
 			client.stream.RemoveClient(sessionID)
 		}
-
-		client.conn.Close()
-		delete(s.clients, sessionID)
 	}
 }
 
@@ -430,16 +453,24 @@ func (s *RTSPServer) cleanupRoutine() {
 
 func (s *RTSPServer) cleanupInactiveStreams() {
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
 
 	now := time.Now()
+	var inactive []*CameraStream
 	for deviceID, stream := range s.streams {
 		// Remove streams inactive for more than 5 minutes
-		if now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0 {
+		stream.mutex.RLock()
+		isInactive := now.Sub(stream.lastActivity) > 5*time.Minute && len(stream.clients) == 0
+		stream.mutex.RUnlock()
+		if isInactive {
 			core.Logger.Trace().Msgf("Cleaning up inactive stream for camera: %s", stream.camera.DeviceName)
-			stream.Stop()
 			delete(s.streams, deviceID)
+			inactive = append(inactive, stream)
 		}
+	}
+	s.mutex.Unlock()
+
+	for _, stream := range inactive {
+		stream.Stop()
 	}
 }
 
@@ -475,8 +506,9 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 	cs.clients[client.session] = client
 	cs.lastActivity = time.Now()
 
-	// Start stream if not active
-	if !cs.active {
+	// Only one startup should run, and the RTSP client lock must not be held by it.
+	if !cs.active && !cs.starting {
+		cs.starting = true
 		go cs.startStream()
 	}
 }
@@ -484,7 +516,11 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 func (cs *CameraStream) RemoveClient(sessionID string) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
+	cs.removeClientLocked(sessionID, true)
+}
 
+// removeClientLocked requires cs.mutex to be held.
+func (cs *CameraStream) removeClientLocked(sessionID string, scheduleShutdown bool) {
 	// Remove from RTP forwarder
 	if cs.webrtcBridge != nil && cs.webrtcBridge.rtpForwarder != nil {
 		cs.webrtcBridge.rtpForwarder.RemoveClient(sessionID)
@@ -494,7 +530,7 @@ func (cs *CameraStream) RemoveClient(sessionID string) {
 	cs.lastActivity = time.Now()
 
 	// Schedule stream shutdown if no clients and stream is active
-	if len(cs.clients) == 0 && cs.active {
+	if scheduleShutdown && len(cs.clients) == 0 && cs.active {
 		cs.scheduleShutdown()
 	}
 }
@@ -506,33 +542,41 @@ func (cs *CameraStream) SetShutdownDelay(delay time.Duration) {
 }
 
 func (cs *CameraStream) Stop() {
+	cs.mutex.Lock()
 	// Clear all clients first
 	for sessionID := range cs.clients {
-		cs.RemoveClient(sessionID)
+		cs.removeClientLocked(sessionID, false)
 	}
+	cs.mutex.Unlock()
 
 	// Stop the stream
 	cs.stopStream()
 }
 
 func (cs *CameraStream) startStream() {
-	cs.mutex.Lock()
-	defer cs.mutex.Unlock()
+	cs.startStreamWith(cs.webrtcBridge.Start)
+}
 
-	if cs.active {
-		return
-	}
-
+func (cs *CameraStream) startStreamWith(startBridge func() error) {
 	core.Logger.Info().Msgf("Starting stream for camera: %s", cs.camera.DeviceName)
 
-	if err := cs.webrtcBridge.Start(); err != nil {
+	if err := startBridge(); err != nil {
 		core.Logger.Error().Err(err).Msg("Failed to start WebRTC bridge")
+		cs.mutex.Lock()
+		cs.starting = false
 		cs.stopStreamInternal()
+		cs.mutex.Unlock()
 		return
 	}
 
+	cs.mutex.Lock()
+	cs.starting = false
 	cs.connecting = false
 	cs.active = true
+	if len(cs.clients) == 0 {
+		cs.scheduleShutdown()
+	}
+	cs.mutex.Unlock()
 }
 
 func (cs *CameraStream) stopStream() {
@@ -548,6 +592,7 @@ func (cs *CameraStream) stopStreamInternal() {
 	}
 
 	wasActive := cs.active
+	cs.starting = false
 	cs.active = false
 	cs.connecting = false
 
@@ -570,7 +615,7 @@ func (cs *CameraStream) stopStreamInternal() {
 	// Remove from server map in a separate goroutine to avoid potential deadlock
 	go func() {
 		if cs.server != nil {
-			cs.server.removeStream(cs.streamId)
+			cs.server.removeStream(cs.streamId, cs)
 		}
 	}()
 }
