@@ -61,7 +61,22 @@ ffplay rtsp://localhost:8554/MyCamera
 **🔑 Email/Password**
 ```bash
 ./tuya-ipc-terminal auth add eu-central user@example.com --password
-# Enter password and select country code interactively
+# Enter password when prompted
+```
+
+Accounts are tied to the phone country code they were registered with. If the
+login fails, pass it explicitly with `--country-code` (see
+`auth show-country-codes`):
+
+```bash
+./tuya-ipc-terminal auth add us-west user@example.com --password --country-code 55
+```
+
+Brazilian accounts can use the `brazil` shortcut instead, which targets the
+`us-west` data center with country code `55`:
+
+```bash
+./tuya-ipc-terminal auth add brazil user@example.com --password
 ```
 
 #### User Management Commands
@@ -100,6 +115,7 @@ ffplay rtsp://localhost:8554/MyCamera
 | `us-east` | protect-ue.ismartlife.me | East America |
 | `china` | protect.ismartlife.me | China |
 | `india` | protect-in.ismartlife.me | India |
+| `brazil` | protect-us.ismartlife.me | Brazil (West America data center) |
 
 ### 📹 Camera Management
 

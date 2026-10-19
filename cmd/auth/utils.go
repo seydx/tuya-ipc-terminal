@@ -17,6 +17,9 @@ var AvailableRegions = []tuya.Region{
 	{"us-east", "protect-ue.ismartlife.me", "East America", "AZ"},
 	{"china", "protect.ismartlife.me", "China", "AY"},
 	{"india", "protect-in.ismartlife.me", "India", "IN"},
+	// Brazil has no data center of its own; its accounts live on us-west but
+	// only log in with their phone country code, not the "AZ" continent code.
+	{"brazil", "protect-us.ismartlife.me", "Brazil (West America data center)", "55"},
 }
 
 var CountryCodesData = []CountryCode{

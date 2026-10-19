@@ -65,13 +65,15 @@ Authentication methods:
 
 Example:
   tuya-ipc-terminal auth add eu-central user@example.com
-  tuya-ipc-terminal auth add --password eu-central user@example.com`,
+  tuya-ipc-terminal auth add --password eu-central user@example.com
+  tuya-ipc-terminal auth add --password --country-code 55 us-west user@example.com`,
 		Args: cobra.ExactArgs(2),
 		RunE: runAddUser,
 	}
 
 	cmd.Flags().Bool("qr", false, "Use QR code authentication (default)")
 	cmd.Flags().Bool("password", false, "Use email/password authentication")
+	cmd.Flags().String("country-code", "", "Phone country code of the account (e.g. 55 for Brazil), used with --password")
 
 	return cmd
 }
@@ -97,6 +99,7 @@ func newRefreshCmd() *cobra.Command {
 
 	cmd.Flags().Bool("qr", false, "Use QR code authentication (default)")
 	cmd.Flags().Bool("password", false, "Use email/password authentication")
+	cmd.Flags().String("country-code", "", "Phone country code of the account (e.g. 55 for Brazil), used with --password")
 
 	return cmd
 }
@@ -174,6 +177,11 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 
 	usePassword, _ := cmd.Flags().GetBool("password")
 	useQR, _ := cmd.Flags().GetBool("qr")
+	countryCode, _ := cmd.Flags().GetString("country-code")
+
+	if countryCode != "" && !isKnownCountryCode(countryCode) {
+		return fmt.Errorf("unknown country code: %s (see 'auth show-country-codes')", countryCode)
+	}
 
 	if !usePassword && !useQR {
 		authMethod := promptAuthMethod()
@@ -228,7 +236,7 @@ func runAddUser(cmd *cobra.Command, args []string) error {
 
 	var sessionData *tuya.SessionData
 	if usePassword {
-		sessionData, err = performPasswordAuthentication(*selectedRegion, email)
+		sessionData, err = performPasswordAuthentication(*selectedRegion, email, countryCode)
 	} else {
 		sessionData, err = performQRAuthentication(*selectedRegion, email)
 	}
@@ -283,6 +291,11 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 
 	usePassword, _ := cmd.Flags().GetBool("password")
 	useQR, _ := cmd.Flags().GetBool("qr")
+	countryCode, _ := cmd.Flags().GetString("country-code")
+
+	if countryCode != "" && !isKnownCountryCode(countryCode) {
+		return fmt.Errorf("unknown country code: %s (see 'auth show-country-codes')", countryCode)
+	}
 
 	if !usePassword && !useQR {
 		authMethod := promptAuthMethod()
@@ -320,7 +333,7 @@ func runRefreshUser(cmd *cobra.Command, args []string) error {
 
 	var sessionData *tuya.SessionData
 	if usePassword {
-		sessionData, err = performPasswordAuthentication(*selectedRegion, email)
+		sessionData, err = performPasswordAuthentication(*selectedRegion, email, countryCode)
 	} else {
 		sessionData, err = performQRAuthentication(*selectedRegion, email)
 	}
@@ -497,7 +510,11 @@ func promptPassword() (string, error) {
 	return string(password), nil
 }
 
-func performPasswordAuthentication(region tuya.Region, email string) (*tuya.SessionData, error) {
+// The Tuya login API keys accounts by the phone country code they were
+// registered with. Countries that share a data center without matching its
+// continent code (e.g. Brazil on us-west) need countryCode set explicitly;
+// when empty, the region's continent code is sent instead.
+func performPasswordAuthentication(region tuya.Region, email, countryCode string) (*tuya.SessionData, error) {
 	serverHost := region.Host
 
 	password, err := promptPassword()
@@ -509,7 +526,11 @@ func performPasswordAuthentication(region tuya.Region, email string) (*tuya.Sess
 
 	fmt.Println("\nAuthenticating with email/password...")
 
-	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, region.Continent)
+	if countryCode == "" {
+		countryCode = region.Continent
+	}
+
+	loginResult, err := tuya.PasswordLogin(httpClient, serverHost, email, password, countryCode)
 	if err != nil {
 		return nil, fmt.Errorf("password authentication failed: %v", err)
 	}
@@ -625,4 +646,13 @@ func extractCookies(client *http.Client, serverHost string) []*tuya.Cookie {
 	}
 
 	return cookies
+}
+
+func isKnownCountryCode(code string) bool {
+	for _, country := range CountryCodesData {
+		if country.C == code {
+			return true
+		}
+	}
+	return false
 }

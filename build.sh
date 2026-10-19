@@ -96,6 +96,7 @@ echo "  us-west       West America       (protect-us.ismartlife.me)"
 echo "  us-east       East America       (protect-ue.ismartlife.me)"
 echo "  china         China              (protect.ismartlife.me)"
 echo "  india         India              (protect-in.ismartlife.me)"
+echo "  brazil        Brazil             (protect-us.ismartlife.me)"
 
 print_section "Authentication Methods"
 echo "  QR Code       Scan QR code with Tuya Smart/Smart Life app (default)"
