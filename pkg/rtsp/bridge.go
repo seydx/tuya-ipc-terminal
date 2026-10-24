@@ -54,6 +54,7 @@ type WebRTCBridge struct {
 	videoTrack  *pion.TrackRemote
 	audioTrack  *pion.TrackRemote
 	backchannel *pion.TrackLocalStaticRTP
+	speakerOn   bool
 
 	// Callbacks
 	OnVideoPacket func(packet *rtp.Packet)
@@ -211,6 +212,17 @@ func (wb *WebRTCBridge) IsConnected() bool {
 
 func (wb *WebRTCBridge) ForwardBackchannelAudioPacket(packet *rtp.Packet) {
 	if wb.backchannel != nil {
+		// The camera keeps its speaker muted until the app sends the 312
+		// "speaker" command (protocol value 1 = on). Do it once, on the first
+		// talkback packet, so the device plays what we forward.
+		if !wb.speakerOn && wb.cameraClient != nil {
+			if err := wb.cameraClient.SendSpeaker(1); err != nil {
+				core.Logger.Warn().Err(err).Msg("Talkback: failed to enable camera speaker")
+			} else {
+				core.Logger.Info().Msg("Talkback: camera speaker enabled")
+			}
+			wb.speakerOn = true
+		}
 		_ = wb.backchannel.WriteRTP(packet)
 	}
 }
